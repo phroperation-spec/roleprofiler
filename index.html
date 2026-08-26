@@ -1,0 +1,2357 @@
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Role Profile</title>
+<style>
+  :root{
+    --paper:#EFF1F0; --card:#FBFCFB; --ink:#181C1A; --sub:#5B655F; --faint:#8A938D;
+    --line:#D8DCD9; --lineSoft:#E7EAE8; --accent:#186A54; --accentSoft:#E4EFEA;
+    --warn:#B4541E; --warnSoft:#F6E7DC;
+    --gwcGreen:#186A54; --gwcOrange:#C97A26; --gwcRed:#B3261E;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--paper);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  .tnum{font-variant-numeric:tabular-nums}
+  button{font-family:inherit}
+  input,textarea,select{font-family:inherit;color:var(--ink)}
+  input:focus-visible,textarea:focus-visible,button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .wrap{max-width:1600px;margin:0 auto;padding:0 24px}
+  header{border-bottom:1px solid var(--line);background:var(--card)}
+  .logo{width:38px;height:38px;border-radius:9px;background:var(--accent);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800}
+  .row{display:flex;align-items:center;gap:12px}
+  .between{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+  .muted{color:var(--faint)}
+  .unit{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:9px;background:var(--paper);padding:6px 12px}
+  .unit select{border:none;background:transparent;font-size:13.5px;font-weight:600;cursor:pointer}
+  .tabbtn{display:flex;align-items:center;gap:8px;padding:8px 14px;font-size:13.5px;border:none;border-radius:8px;background:transparent;color:var(--sub);cursor:pointer;font-weight:500}
+  .tabbtn.on{background:var(--accentSoft);color:var(--accent);font-weight:600}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px}
+  .eyebrow{font-size:11.5px;font-weight:700;color:var(--faint);letter-spacing:.04em}
+  .h1{font-size:20px;font-weight:650;letter-spacing:-.01em}
+  .flexwrap{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap}
+  .btn{border:none;border-radius:8px;cursor:pointer;font-weight:600}
+  .btn-primary{background:var(--accent);color:#fff}
+  .btn-ghost{background:transparent;border:1px solid var(--line);color:var(--sub)}
+  .btn-warn{background:var(--warnSoft);color:var(--warn)}
+  .sec-head{width:100%;display:flex;align-items:center;gap:12px;padding:12px 16px;background:transparent;border:none;cursor:pointer;text-align:left}
+  .field label{display:block}
+  .inp{width:100%;font-size:13.5px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--paper)}
+  .choice{display:flex;align-items:flex-start;gap:10px;padding:8px 12px;border-radius:8px;cursor:pointer;text-align:left;border:1px solid var(--lineSoft);background:var(--card);width:100%}
+  .badge{flex:0 0 auto;width:20px;height:20px;border-radius:5px;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;background:var(--paper);color:var(--sub);margin-top:1px}
+  .ev{width:100%;min-height:132px;font-size:12.5px;line-height:1.45;padding:8px 10px;border:1px solid var(--line);border-radius:8px;resize:vertical;background:var(--paper)}
+  table{width:100%;border-collapse:collapse}
+  th{font-size:11px;font-weight:700;color:var(--faint);letter-spacing:.03em;padding:10px 12px;text-align:left;white-space:nowrap}
+  td{padding:9px 12px;vertical-align:top;font-size:12px}
+  /* Competency Gap Analysis table — fixed % column widths so all 9 columns fit without horizontal scrolling. */
+  .gap-table{table-layout:fixed}
+  .gap-table th{white-space:normal;line-height:1.25;font-size:10.2px;padding:8px 6px;vertical-align:bottom}
+  .gap-table td{padding:8px 6px;overflow-wrap:anywhere;word-break:break-word}
+  .sig{border-bottom:1px solid var(--ink);height:34px}
+  .cellbtn{cursor:pointer}
+  .cellbtn:not(.stdreset){transition:transform .12s ease,box-shadow .12s ease,border-color .12s ease,background .12s ease}
+  .cellbtn:not(.stdreset):hover{transform:translateY(-2px);box-shadow:0 4px 10px rgba(24,106,84,.24);border-color:var(--accent) !important}
+  .cellbtn.off{border-style:dashed !important}
+  .cellbtn.off:hover{background:var(--accentSoft) !important;color:var(--accent) !important}
+  .cellbtn.stdreset{transition:opacity .12s ease}
+  .cellbtn.stdreset:hover{opacity:.7;text-decoration:underline}
+  @media print{
+    header,.no-print{display:none !important}
+    body{background:#fff}
+    .print-card{border:1px solid #cfd6d2 !important}
+    .wrap{padding:0}
+  }
+  /* Cloud sync (Firebase) status — same floating badge/banner pattern as the Employee
+     Demographics tool, so cross-device sync status is visible no matter which admin tab
+     or business unit is open. */
+  #syncBadge{
+    position:fixed; right:12px; bottom:12px; z-index:9999;
+    background:rgba(24,28,26,0.92); color:#c3cbe0; font-family:inherit;
+    font-size:11.5px; padding:6px 10px; border-radius:20px; box-shadow:0 2px 8px rgba(0,0,0,.25);
+    cursor:pointer; letter-spacing:.2px;
+  }
+  #syncFailBanner{
+    display:none; position:fixed; top:0; left:0; right:0; z-index:9999;
+    background:#7a3b1e; color:#fff; font-family:inherit; font-size:12.5px;
+    text-align:center; padding:6px 10px;
+  }
+  @media print{ #syncBadge,#syncFailBanner{display:none !important} }
+</style>
+
+<div id="syncFailBanner">⚠ Your last change could not be saved to the cloud (check your internet connection or Firebase database rules). It's kept safely in this browser only — reopening this site elsewhere may not show it yet.</div>
+<header class="no-print">
+  <div class="wrap" style="padding-top:16px;padding-bottom:16px">
+    <div class="between">
+      <div class="row">
+        <div class="logo">≡</div>
+        <div>
+          <div style="font-size:17px;font-weight:650;letter-spacing:-.01em">Role Profile</div>
+          <div style="font-size:12.5px" class="muted">Job-grade evaluation across Knowledge · Competencies · Duties · Accountabilities</div>
+        </div>
+      </div>
+      <div class="row">
+        <label class="unit">
+          <span style="color:var(--sub)">🏢</span>
+          <span class="eyebrow">UNIT</span>
+          <select id="bu"></select>
+        </label>
+        <div id="sync" class="row" style="font-size:12px;gap:6px;color:var(--faint)">Auto-saves</div>
+        <div id="authbar" class="row" style="font-size:12px;gap:8px"></div>
+      </div>
+    </div>
+    <nav id="tabs" class="row" style="gap:4px;margin-top:16px"></nav>
+  </div>
+</header>
+
+<main id="view" class="wrap" style="padding-top:24px;padding-bottom:40px"></main>
+<div id="syncBadge" title="Click to sync now">☁ Sync not set up</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script>
+const DATA = {"C":{"paper":"#EFF1F0","card":"#FBFCFB","ink":"#181C1A","sub":"#5B655F","faint":"#8A938D","line":"#D8DCD9","lineSoft":"#E7EAE8","accent":"#186A54","accentSoft":"#E4EFEA","warn":"#B4541E","warnSoft":"#F6E7DC"},"FAM_COLORS":["#A7C4B5","#6FA88C","#3E8C6C","#186A54","#0C4436"],"FRAMEWORK":[{"id":"A","name":"Knowledge","subs":[{"id":"edu","name":"Education","choices":[{"id":"a","def":"Holder of any Associate's Degree (Specialist)","weight":1},{"id":"b","def":"Holder of any Bachelor's Degree (Generalist)","weight":2},{"id":"c","def":"Holder of any Bachelor's Degree (Lead)","weight":3},{"id":"d","def":"Holder of any Bachelor's Degree and/or Post-graduate degree","weight":4},{"id":"e","def":"Holder of any Bachelor's Degree and/or Post-graduate degree","weight":5}]},{"id":"exp","name":"Work Experience","choices":[{"id":"a","def":"0–2 years relevant work experience","weight":1},{"id":"b","def":"2–4 years relevant work experience","weight":2},{"id":"c","def":"4–6 years related work experience","weight":3},{"id":"d","def":"At least 5 years relevant work experience + at least 2 years supervisory or managerial role experience","weight":4},{"id":"e","def":"At least 5 years relevant work experience + at least 5 years supervisory or managerial role experience","weight":5}]},{"id":"prof","name":"Professional Qualification","choices":[{"id":"a","def":"None","weight":1},{"id":"b","def":"PRC License","weight":2},{"id":"c","def":"PRC License","weight":3},{"id":"d","def":"PRC License","weight":4},{"id":"e","def":"PRC License","weight":5}]},{"id":"jobreq","name":"Job Requirements (Proficiency)","choices":[{"id":"a","def":"Not yet proficient across Operations (project/enterprise mgmt, marketing & communication, networking & partnerships, strategic mgmt) and Administrative (talent mgmt, financial & admin mgmt, governance).","weight":1},{"id":"b","def":"Not yet proficient in networking, strategic mgmt, talent mgmt and governance — but already moderately proficient in project/enterprise mgmt, marketing & communication, and financial & admin mgmt.","weight":2},{"id":"c","def":"Moderately proficient across all Operations and Administrative dimensions.","weight":3},{"id":"d","def":"Moderately proficient in strategic mgmt, talent mgmt and governance — but highly proficient in project/enterprise mgmt, marketing & communication, networking, and financial & admin mgmt.","weight":4},{"id":"e","def":"Highly proficient across all Operations and Administrative dimensions.","weight":5}]}]},{"id":"B","name":"Competencies","subs":[{"id":"plan","name":"Planning & Organizing","choices":[{"id":"a","def":"Work is planned on a day-to-day basis, organizing routine tasks efficiently and on time and managing timelines and resources with discipline.","weight":1},{"id":"b","def":"Work involves varying tasks that must be prioritized and carried out independently within set guidelines, organized effectively and aligned to team goals.","weight":2},{"id":"c","def":"Planning carries accountability for achieving a specific objective, performed solo or with a team, coordinating plans and priorities and anticipating resource needs and dependencies.","weight":3},{"id":"d","def":"Planning spans an immediate business cycle — a fiscal year or project — with work organized through leading a team to deliver end results, coordinating plans across functions and ensuring disciplined execution.","weight":4},{"id":"e","def":"Planning is strategic in nature with long-term business implications, implemented through delegation and oversight of results while driving organizational alignment and embedding execution discipline enterprise-wide.","weight":5}]},{"id":"solve","name":"Problem Solving & Decision Making","choices":[{"id":"a","def":"Deals with simple issues under readily available supervision, following set procedures and making sound, timely calls within that structure.","weight":1},{"id":"b","def":"Handles routine issues within clear guidelines, applying structured analysis to choose among permitted alternatives while balancing short-term solutions with longer-term impact.","weight":2},{"id":"c","def":"Addresses similar, recurring issues that require analysis and a search of alternatives, exercising independent judgment within own authority and job scope, and anticipating problems before they escalate.","weight":3},{"id":"d","def":"Works through diversified issues requiring significant interpretation and judgment, weighing considerable impact on other areas while balancing risks and opportunities and guiding peers through their own decision-making.","weight":4},{"id":"e","def":"Confronts broad issues with long-term, significant implications, making strategic and directional decisions of major business impact while shaping the organization's decision-making culture and embedding foresight and creativity into how choices are made.","weight":5}]},{"id":"lead","name":"Leadership","choices":[{"id":"a","def":"Operates as a sole contributor or team member, showing emerging leadership behavior by taking ownership of small individual outcomes.","weight":1},{"id":"b","def":"Takes a leading role on work with common goals that requires cooperating with others, fostering collaboration and accountability while aligning effort with organizational goals.","weight":2},{"id":"c","def":"Leads non-routine projects or a business function — setting team goals, providing direction, delegating and monitoring progress, and resolving internal and external conflicts — inspiring the team with vision and developing talent through coaching.","weight":3},{"id":"d","def":"Drives a team-based culture across a significant part of the business, inspiring teams with vision and motivation, developing talent through coaching and mentoring, and building trust and driving change across functions.","weight":4},{"id":"e","def":"Carries responsibility for steering diversified groups and businesses, modeling emotionally intelligent leadership that shapes organizational culture, sets strategic direction, and empowers leaders at every level.","weight":5}]},{"id":"innov","name":"Innovation","choices":[{"id":"a","def":"Work must strictly adhere to established standards and procedures, though the role holder is still expected to accept feedback constructively and keep developing current skills within that structure.","weight":1},{"id":"b","def":"Work allows room for new approaches and innovative solutions, seeking ways to improve work, processes, or performance and initiating improvement projects rather than waiting to be asked.","weight":2},{"id":"c","def":"Involves developing new initiatives to enhance efficiency or achieve business goals, actively experimenting with new methods and introducing initiatives with a measurable, positive impact.","weight":3},{"id":"d","def":"Constantly demands original ideas and innovative solutions — turning abstract ideas into reality — while sharing knowledge and coaching others to grow through experimentation with new methods and technologies.","weight":4},{"id":"e","def":"Requires seeing the big picture to steer development and growth, acting as a role model for continuous improvement whose initiatives champion capability development and deliver significant business impact.","weight":5}]},{"id":"comm","name":"Communication","choices":[{"id":"a","def":"Interaction is normal and courteous, communicated clearly and reliably enough to ensure mutual understanding in everyday exchanges.","weight":1},{"id":"b","def":"Effective communication matters and affects end results, requiring the role holder to adapt style to audience needs and listen attentively to ensure mutual understanding.","weight":2},{"id":"c","def":"The major role is to influence and negotiate, building trust through transparency and facilitating communication that resolves misunderstandings constructively.","weight":3},{"id":"d","def":"Work relationships bear significant impact on end results, requiring transparency that builds trust, facilitates effective team communication, and encourages open dialogue across functions.","weight":4},{"id":"e","def":"Internal and external relationships at every level are crucial, calling for someone who shapes the organization's communication culture and inspires alignment through vision, storytelling, and modeled empathy.","weight":5}]},{"id":"cust","name":"Customer Focus","choices":[{"id":"a","def":"Contact with customers calls for basic courtesy, accurate information, and simple assistance in person or by phone, delivered reliably enough to build trust through responsiveness.","weight":1},{"id":"b","def":"Direct contact with customers requires active listening to understand needs and deliver services efficiently and on time, adapting solutions to feedback and building trust through accountability.","weight":2},{"id":"c","def":"Mainly handles customer complaints, acting professionally to resolve problems without escalating where possible, anticipating needs and co-creating solutions that build lasting relationships.","weight":3},{"id":"d","def":"Develops relationships with customers, gathering comments and proposing measures to enhance services through personalized, proactive solutions that anticipate needs and build lasting loyalty.","weight":4},{"id":"e","def":"Develops networks and linkages to expand products and services, embedding customer-centricity into the organization's strategy and systems.","weight":5}]},{"id":"biz","name":"Business Acumen","choices":[{"id":"a","def":"Understands business fundamentals and practices.","weight":1},{"id":"b","def":"Applies knowledge of industry, market and business trends to prioritize activities.","weight":2},{"id":"c","def":"Leverages business-sector opportunities and market dynamics to execute strategy.","weight":3},{"id":"d","def":"Instills a business-oriented mindset that drives the organization forward.","weight":4},{"id":"e","def":"Champions business context as a trusted strategic partner.","weight":5}]}]},{"id":"C","name":"Duties & Responsibilities","subs":[{"id":"scope","name":"Scope of Work","choices":[{"id":"a","def":"Activities confined within a work unit.","weight":1},{"id":"b","def":"Work within a specific area involving others outside own unit.","weight":2},{"id":"c","def":"Integration of a wide spectrum of activities with linkages to other network units — improvement of existing product.","weight":3},{"id":"d","def":"Diverse activities to achieve specific business objectives of a functional group, perhaps a regional sector — new product.","weight":4},{"id":"e","def":"Define goals and strategies and direct activities for a broad range of functions or businesses — broad function.","weight":5}]},{"id":"impact","name":"Impact on End Results","choices":[{"id":"a","def":"No direct influence on end results.","weight":1},{"id":"b","def":"Supporting role with minimal impact.","weight":2},{"id":"c","def":"Advisory / facilitation role influencing end results.","weight":3},{"id":"d","def":"Jointly accountable with others to achieve end results.","weight":4},{"id":"e","def":"Controlling impact on end results.","weight":5}]},{"id":"cmplx","name":"Complexity of Work","choices":[{"id":"a","def":"Involves routine work processes needing little training, operating simple equipment strictly to instruction, with decisions largely following set procedure.","weight":1},{"id":"b","def":"Follows established standards and procedures with some training required and close supervision, applying structured analysis when choosing among permitted alternatives.","weight":2},{"id":"c","def":"Operates within a specific scope of a function under general guidance, possibly supervising others and drawing on specialized training, exercising independent judgment and anticipating issues before they escalate.","weight":3},{"id":"d","def":"Requires understanding of concepts, theories, principles, and practices to lead in the achievement of business goals, weighing considerable judgment on issues that affect other areas while guiding peers through complex problems.","weight":4},{"id":"e","def":"Involves defining goals and strategies and directing activities across broad, complex technical, professional, or business practices, making strategic decisions of major consequence and shaping how the organization approaches problem-solving.","weight":5}]},{"id":"rev","name":"Revenue Contribution","choices":[{"id":"a","def":"No direct contribution to revenue.","weight":1},{"id":"b","def":"Provide supporting services for generating revenue.","weight":2},{"id":"c","def":"Direct interaction with customers to produce revenue.","weight":3},{"id":"d","def":"Manage a unit to deliver target revenue.","weight":4},{"id":"e","def":"Manage a number of units and accountable for regional revenue income.","weight":5}]},{"id":"prod","name":"Contribution to Product Delivery","choices":[{"id":"a","def":"No direct contribution to product delivery.","weight":1},{"id":"b","def":"Provide supporting services for product delivery.","weight":2},{"id":"c","def":"Direct interaction with customers for product delivery.","weight":3},{"id":"d","def":"Manage a unit for product delivery.","weight":4},{"id":"e","def":"Manage a number of units and accountable for product delivery.","weight":5}]},{"id":"goals","name":"Contribution to Dept / Company Goals","choices":[{"id":"a","def":"Individual contributor.","weight":1},{"id":"b","def":"Provide supporting services to dept / company goals.","weight":2},{"id":"c","def":"Direct interaction with customers.","weight":3},{"id":"d","def":"Manage a unit to contribute to dept / company goals.","weight":4},{"id":"e","def":"Manage a number of units and accountable for the achievement of departmental objectives.","weight":5}]},{"id":"fin","name":"Control of Financial Resources","choices":[{"id":"a","def":"Accountable for processing and maintaining financial records to enable financial control, upholding ethical standards and transparency in how those records are handled.","weight":1},{"id":"b","def":"Executes financial control measures such as accounting procedures and petty-cash management, delivering on these commitments reliably and transparently.","weight":2},{"id":"c","def":"Accountable for budget preparation and expense control for own unit, maintaining accountability and acting in the unit's best interest without needing close supervision.","weight":3},{"id":"d","def":"Serves as custodian of corporate assets, managing funding activities, developing accounting policies, and assessing the financial viability of investments, reinforcing integrity and accountability across the team in doing so.","weight":4},{"id":"e","def":"Holds overall control of corporate or unit financial resources of significant value, building trust proactively and holding the credibility needed to safeguard those resources responsibly.","weight":5}]},{"id":"hr","name":"Management of Human Resources","choices":[{"id":"a","def":"Carries no formal responsibility for human resources at this level.","weight":1},{"id":"b","def":"Supervises the daily work of subordinates, providing on-the-job training and monitoring performance, fostering the collaboration and accountability of a small team.","weight":2},{"id":"c","def":"Plans manpower requirements, training and staff development, reward recommendations, grievance handling, and team building — or acts as internal consultant on personnel matters — leading with direction that aligns team efforts to organizational goals.","weight":3},{"id":"d","def":"Accountable for the overall management of human resources in a sizeable unit or function, inspiring teams with vision and motivation while developing talent through coaching and mentoring.","weight":4},{"id":"e","def":"Formulates corporate strategies for managing human resources — developing systems, policies, direction, and advice — modeling the emotionally intelligent leadership that shapes organizational culture at scale.","weight":5}]},{"id":"proc","name":"Process Management","choices":[{"id":"a","def":"Takes part in work processes with awareness of related activities, applying feedback constructively while learning how those processes fit together.","weight":1},{"id":"b","def":"Accountable for the smooth implementation of standard processes, seeking ways to improve work and performance within that scope.","weight":2},{"id":"c","def":"Contributes directly to process improvement, actively experimenting with better methods and initiating multiple improvement projects.","weight":3},{"id":"d","def":"Owns key processes and acts as change agent for process improvement, introducing initiatives that measurably improve how the business runs.","weight":4},{"id":"e","def":"Develops policies, processes, and standard operating procedures, acting as a role model for continuous improvement whose changes carry significant business impact.","weight":5}]}]},{"id":"D","name":"Accountabilities","subs":[{"id":"auth","name":"Authority","choices":[{"id":"a","def":"Works to instructions or standards already set, upholding ethical standards and transparency in following them.","weight":1},{"id":"b","def":"Holds authority within assigned limits for a small work unit, delivering on commitments reliably and transparently within that scope.","weight":2},{"id":"c","def":"Holds authority within assigned limits for a functional unit, maintaining accountability and acting in the unit's best interest without close supervision.","weight":3},{"id":"d","def":"Holds authority within assigned limits across functional units, reinforcing integrity and accountability across teams that span those units.","weight":4},{"id":"e","def":"Carries authority for significant financial and corporate commitments, holding the high credibility needed to build trust proactively across the organization.","weight":5}]},{"id":"chal","name":"Challenges","choices":[{"id":"a","def":"Operates in a stable environment with minimal change, completing tasks diligently and maintaining composure even when small setbacks arise.","weight":1},{"id":"b","def":"Tackles change with guidance from superiors, staying focused under pressure and approaching feedback maturely while adjusting to new direction.","weight":2},{"id":"c","def":"Requires creative thinking and adaptability as essential parts of the work, staying focused under pressure and seeking solutions rather than waiting for direction.","weight":3},{"id":"d","def":"Takes the leading role in identifying opportunities and threats and managing change within own area, tackling those challenges with optimism and keeping others motivated through them.","weight":4},{"id":"e","def":"Plays a pioneering role for business growth, accountable for delivering results under an uncontrollable external environment, inspiring a culture of perseverance and demonstrating exceptional resilience that gives others confidence.","weight":5}]},{"id":"pres","name":"Presence","choices":[{"id":"a","def":"Involves minimal contact with external parties of an insignificant nature, communicated clearly enough to leave the right impression when it does occur.","weight":1},{"id":"b","def":"Occupies a position that projects the organization's first impression through the role holder's own work, requiring communication adapted to the audience and clearly understood.","weight":2},{"id":"c","def":"Involved in developing and executing public relations programs or product/service promotions, building trust through transparent, well-facilitated communication.","weight":3},{"id":"d","def":"Represents the company as a spokesperson in specific areas of the business, where transparency and open dialogue across functions carry real weight.","weight":4},{"id":"e","def":"Provides direction on goals, strategies, and plans for corporate communication, shaping the organization's communication culture and inspiring alignment through vision and storytelling.","weight":5}]},{"id":"cond","name":"Conditions","choices":[{"id":"a","def":"Work takes place in a generally safe, comfortable location on normal schedules, with the role holder expected to work diligently and stay composed through ordinary day-to-day pressure.","weight":1},{"id":"b","def":"Work occurs in a safe, comfortable location with periodic risks from travel and unsocial hours, requiring the focus and maturity to stay on track despite the disruption.","weight":2},{"id":"c","def":"Involves physical discomfort and mental stress from at least two sources — students/trainees, parents, regulators, partners, workers, customers, travel, or community mobilization — calling for someone who stays focused under pressure and actively seeks solutions.","weight":3},{"id":"d","def":"Involves physical discomfort and mental stress from at least four such sources simultaneously, requiring the optimism and motivation to keep others engaged through sustained pressure.","weight":4},{"id":"e","def":"Involves physical discomfort and mental stress from more than four such sources at once, demanding the exceptional resilience to inspire perseverance in others under sustained strain.","weight":5}]},{"id":"safe","name":"Safety & Security","choices":[{"id":"a","def":"Work requires general awareness of safety and security related issues.","weight":1},{"id":"b","def":"Work involves adherence to safety and security procedures and standards.","weight":2},{"id":"c","def":"Safety and security a priority in the work process of the position.","weight":3},{"id":"d","def":"Work involves development and monitoring of safety and security policies and procedures, and training of personnel.","weight":4},{"id":"e","def":"Work requires high proficiency and specialized knowledge to formulate strategies and programs and handle complex safety and security matters.","weight":5}]},{"id":"comp","name":"Compliance & Standards","choices":[{"id":"a","def":"Requires adherence to internal policies and procedures, working to meet or exceed the performance pledge with the honesty and transparency expected of every role.","weight":1},{"id":"b","def":"Requires work performed to high standards of accuracy for safety, cost, and efficiency, where errors carry critical consequences and reliable delivery matters most.","weight":2},{"id":"c","def":"Compliance with ethical, legal, and professional standards has a significant impact on the work, requiring the accountability to act in the organization's best interest without close supervision.","weight":3},{"id":"d","def":"Executes standards for compliance and ensures corporate governance, reinforcing integrity and accountability across the team in the process.","weight":4},{"id":"e","def":"Develops standards for compliance and ensures corporate governance, holding the credibility and proactive trust-building needed to embed those standards across the organization.","weight":5}]}]}],"DEFAULT_FAMILIES":[{"id":"specialist","name":"Specialist","factor":1},{"id":"generalist","name":"Generalist","factor":2},{"id":"lead","name":"Lead","factor":2},{"id":"business_partner","name":"Business Partner","factor":2},{"id":"strategic_partner","name":"Strategic Partner","factor":2}],"BASE_MULTIPLIER":10,"DEFAULT_JG":[{"jg":1,"min":1000,"max":2000,"fam":"specialist"},{"jg":2,"min":2001,"max":3001,"fam":"specialist"},{"jg":3,"min":3002,"max":4000,"fam":"specialist"},{"jg":4,"min":4001,"max":5001,"fam":"generalist"},{"jg":5,"min":5002,"max":6002,"fam":"generalist"},{"jg":6,"min":6003,"max":7001,"fam":"generalist"},{"jg":7,"min":7002,"max":8002,"fam":"lead"},{"jg":8,"min":8003,"max":9003,"fam":"lead"},{"jg":9,"min":9004,"max":10002,"fam":"lead"},{"jg":10,"min":10003,"max":11003,"fam":"business_partner"},{"jg":11,"min":11004,"max":12004,"fam":"business_partner"},{"jg":12,"min":12005,"max":13003,"fam":"business_partner"},{"jg":13,"min":13004,"max":14004,"fam":"strategic_partner"},{"jg":14,"min":14005,"max":14405,"fam":"strategic_partner"},{"jg":15,"min":14406,"max":16000,"fam":"strategic_partner"}],"DEFAULT_BUSINESS_UNITS":["Corporate","Operations","Training & Certification","Finance & Admin","Human Resources","Sales & Marketing"]};
+const FAM = DATA.FAM_COLORS;
+const L = ["a","b","c","d","e"];
+const cIndex = (id)=>L.indexOf(id);
+
+/* ---------- storage (synced, auto-save) ---------- */
+const KEY_CFG="progression:config:v4", KEY_BU="progression:selectedBU:v4", KEY_SEL="progression:sessions:v4", KEY_CUR_EMP="progression:currentEmployee:v4";
+async function loadKey(k){
+  if(window.storage){
+    try{ const r=await window.storage.get(k); return r?JSON.parse(r.value):null; }catch(e){}
+  }
+  try{ const v=localStorage.getItem(k); return v?JSON.parse(v):null; }catch(e){ return null; }
+}
+async function saveKey(k,v){
+  if(window.storage){
+    try{ await window.storage.set(k,JSON.stringify(v)); }catch(e){}
+  }
+  try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){}
+}
+function flushSaveSync(){
+  // Runs synchronously right before the tab/window closes, so the very
+  // last edit is captured even if it happened inside the 400ms debounce.
+  try{ localStorage.setItem(KEY_CFG,JSON.stringify(state.cfg)); }catch(e){}
+  try{ localStorage.setItem(KEY_BU,JSON.stringify(state.bu)); }catch(e){}
+  try{ localStorage.setItem(KEY_SEL,JSON.stringify(state.sessions)); }catch(e){}
+  try{ localStorage.setItem(KEY_CUR_EMP,JSON.stringify(state.currentEmployeeId)); }catch(e){}
+}
+window.addEventListener("pagehide", flushSaveSync);
+window.addEventListener("beforeunload", flushSaveSync);
+
+/* ---------- Cloud Sync (cross-device, via Firebase Realtime Database) ----------
+   Same pattern used by the Employee Demographics tool: every device that opens this
+   same HTML file reads/writes one shared node in Firebase Realtime Database, and gets
+   live pushes when another device changes something. window.storage/localStorage above
+   only cover THIS browser — once this file is hosted (GitHub Pages or any static host),
+   Firebase is what makes Admin settings, employees, and evaluations sync across every
+   device that opens the link.
+   FIREBASE_CONFIG ships BLANK on purpose — fill it in from your own Firebase project's
+   console (Project settings → General → Your apps → (web app) → SDK setup and
+   configuration) once you've created the Realtime Database you want this tool linked to.
+   Until it's filled in, firebaseReady() below simply returns false and the app keeps
+   working exactly as before (local-only, per-browser) — nothing breaks by leaving it
+   blank. Use a dedicated Firebase project/database for this tool (separate from any
+   other tool's), so there's no shared quota or node-collision risk. */
+const FIREBASE_CONFIG = {
+  apiKey: "",
+  authDomain: "",
+  databaseURL: "",
+  projectId: "",
+  storageBucket: "",
+  messagingSenderId: "",
+  appId: ""
+};
+const FIREBASE_SYNC_PATH = "pgbRoleProfile"; // node in the Realtime Database that holds this tool's shared config/sessions
+
+let _fbRef=null;
+let _lastKnownUpdatedAt=0; // used to ignore the echo of our own writes coming back through the live listener
+
+// ---- Local-edit guard --------------------------------------------------
+// Edits update state.cfg/bu/sessions/currentEmployeeId locally first and only reach the
+// cloud ~900ms later (see schedulePush). Meanwhile the initial pullFromCloud() and the
+// live listener can resolve with an OLDER snapshot. Without this guard, that older
+// snapshot would silently overwrite whatever was just changed. _localChangeSeq/
+// _syncedChangeSeq track whether there's an edit that hasn't finished pushing yet; while
+// there is, incoming remote snapshots are skipped rather than applied.
+let _localChangeSeq=0;
+let _syncedChangeSeq=0;
+function markLocalChange(){ _localChangeSeq++; }
+function hasUnsyncedLocalChanges(){ return _localChangeSeq!==_syncedChangeSeq; }
+let _pushTimer=null;
+
+function firebaseReady(){
+  if(_fbRef) return true;
+  try{
+    if(!window.firebase || !FIREBASE_CONFIG.apiKey) return false;
+    if(!firebase.apps || !firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+    _fbRef=firebase.database().ref(FIREBASE_SYNC_PATH);
+    ensureFirebaseAuth(); // kick off anonymous sign-in in the background; pullFromCloud() awaits it before the first read
+    return true;
+  }catch(err){
+    console.warn("Firebase init failed:", err);
+    return false;
+  }
+}
+
+// ---- Anonymous auth (required by DB rules like "auth != null") -----------
+// This does NOT replace the Admin password gate above — that still gates what a person
+// can see/do inside the app. This is a separate, silent sign-in so the *browser* is
+// allowed to talk to Firebase at all; without it every read/write is rejected by the
+// database rules. Every visitor gets their own anonymous Firebase user id automatically —
+// nobody sees a login prompt for this part.
+let _authPromise=null;
+function ensureFirebaseAuth(){
+  if(_authPromise) return _authPromise;
+  _authPromise=new Promise((resolve)=>{
+    if(!window.firebase || !firebase.auth){ resolve(false); return; }
+    const unsub=firebase.auth().onAuthStateChanged(user=>{ if(user){ unsub(); resolve(true); } });
+    firebase.auth().signInAnonymously().catch(err=>{
+      console.warn("Firebase anonymous sign-in failed:", err);
+      resolve(false);
+    });
+  });
+  return _authPromise;
+}
+
+function updateSyncBadge(status, extra){
+  const el=document.getElementById("syncBadge");
+  if(!el) return;
+  const map={
+    unconfigured:{text:"☁ Sync not set up", color:"#c3cbe0"},
+    syncing:{text:"⏳ Syncing…", color:"#e3c56e"},
+    synced:{text:"☁ Synced"+(extra?` · ${extra}`:""), color:"#9fd6ad"},
+    offline:{text:"⚠ Offline (local copy)", color:"#e3ab6e"}
+  };
+  const m=map[status]||map.unconfigured;
+  el.textContent=m.text;
+  el.style.color=m.color;
+  const banner=document.getElementById("syncFailBanner");
+  if(banner){
+    if(status==="offline") banner.style.display="block";
+    else if(status==="synced") banner.style.display="none";
+  }
+}
+
+function schedulePush(){
+  if(!firebaseReady()) return;
+  clearTimeout(_pushTimer);
+  _pushTimer=setTimeout(pushToCloud,900);
+}
+
+// ---- Firebase key sanitization ------------------------------------------
+// Realtime Database keys can't contain '.', '#', '$', '/', '[', or ']' — but real
+// business-unit or employee-entered text can (e.g. a cost-center-style code with a
+// slash), and several parts of state.cfg use free-text values AS object keys
+// (competencyImportance, roleExpectations, frameworks — all keyed by business unit
+// name). Without this, one such value makes the ENTIRE payload's set() call fail —
+// not just that one field — silently losing every other edit in the same save along
+// with it. These walk the whole payload recursively and swap unsafe characters in KEYS
+// ONLY (never touching values) for a reversible placeholder before every push, and
+// reverse it on every pull.
+const FB_KEY_ESCAPES={".":"~dot~","#":"~hash~","$":"~dollar~","/":"~slash~","[":"~lb~","]":"~rb~"};
+const FB_KEY_UNSAFE_RE=/[.#$/[\]]/g;
+const FB_KEY_UNESCAPES={dot:".",hash:"#",dollar:"$",slash:"/",lb:"[",rb:"]"};
+const FB_KEY_ESCAPED_RE=/~(dot|hash|dollar|slash|lb|rb)~/g;
+function fbSanitizeKeys(node){
+  if(Array.isArray(node)) return node.map(fbSanitizeKeys);
+  if(node && typeof node==="object"){
+    const out={};
+    Object.keys(node).forEach(k=>{
+      const safeKey=k.replace(FB_KEY_UNSAFE_RE,c=>FB_KEY_ESCAPES[c]);
+      out[safeKey]=fbSanitizeKeys(node[k]);
+    });
+    return out;
+  }
+  return node;
+}
+function fbRestoreKeys(node){
+  if(Array.isArray(node)) return node.map(fbRestoreKeys);
+  if(node && typeof node==="object"){
+    const out={};
+    Object.keys(node).forEach(k=>{
+      const realKey=k.replace(FB_KEY_ESCAPED_RE,(m,tag)=>FB_KEY_UNESCAPES[tag]);
+      out[realKey]=fbRestoreKeys(node[k]);
+    });
+    return out;
+  }
+  return node;
+}
+
+// Shared by the one-time pull and the live listener below. Mirrors what init() does with
+// a freshly-loaded local snapshot: adopt the remote data, then run it through the same
+// ensureAllShapes()/migration safety net so an older or partial remote snapshot can't
+// leave the app in a broken shape.
+function applyRemoteData(data){
+  if(hasUnsyncedLocalChanges()) return false; // don't clobber an edit that's still on its way up
+  data=fbRestoreKeys(data);
+  let changed=false;
+  if(data && data.cfg && data.cfg.frameworks){
+    state.cfg=data.cfg;
+    if(!state.cfg.businessUnits.includes(state.bu)) state.bu=state.cfg.businessUnits[0];
+    if(!state.cfg.frameworks[state.bu]) state.cfg.frameworks[state.bu]=cloneFramework();
+    ensureAllShapes();
+    // If this device's signed-in account was deleted on another device while this remote snapshot
+    // was in flight, don't leave it signed in against a user record that no longer exists.
+    if(authUser && !findUserById(authUser.id)){ authUser=null; try{ localStorage.removeItem(KEY_SESSION); }catch(e){} }
+    saveKey(KEY_CFG,state.cfg);
+    changed=true;
+  }
+  if(data && data.bu && state.cfg.businessUnits.includes(data.bu)){
+    state.bu=data.bu;
+    saveKey(KEY_BU,state.bu);
+    changed=true;
+  }
+  if(data && data.sessions){
+    state.sessions=data.sessions;
+    migrateLegacySessions();
+    saveKey(KEY_SEL,state.sessions);
+    changed=true;
+  }
+  if(data && "currentEmployeeId" in data){
+    state.currentEmployeeId=data.currentEmployeeId||"";
+    if(state.currentEmployeeId && !findEmployeeById(state.currentEmployeeId)) state.currentEmployeeId="";
+    saveKey(KEY_CUR_EMP,state.currentEmployeeId);
+    changed=true;
+  }
+  if(data && data.updatedAt) _lastKnownUpdatedAt=data.updatedAt;
+  if(changed){
+    ensureSession();
+    renderBU(); renderTabs(); renderAuthBar(); renderView();
+  }
+  return changed;
+}
+
+async function pullFromCloud(){
+  if(!firebaseReady()){ updateSyncBadge("unconfigured"); return; }
+  await ensureFirebaseAuth();
+  updateSyncBadge("syncing");
+  try{
+    const snap=await _fbRef.once("value");
+    if(hasUnsyncedLocalChanges()) return; // a local edit landed while this pull was in flight
+    const data=snap.val();
+    if(data){
+      applyRemoteData(data);
+      const stamp=_lastKnownUpdatedAt?new Date(_lastKnownUpdatedAt).toLocaleTimeString():"";
+      updateSyncBadge("synced",stamp);
+    }else{
+      // Nothing in the cloud yet (first-ever run) — seed it from whatever's local/default.
+      updateSyncBadge("synced");
+      pushToCloud();
+    }
+  }catch(err){
+    console.warn("Cloud sync (pull) failed — using local copy:", err);
+    updateSyncBadge("offline");
+  }
+}
+
+async function pushToCloud(){
+  if(!firebaseReady()) return;
+  await ensureFirebaseAuth();
+  updateSyncBadge("syncing");
+  try{
+    const payload={
+      cfg:state.cfg,
+      bu:state.bu,
+      sessions:state.sessions,
+      currentEmployeeId:state.currentEmployeeId,
+      updatedAt:Date.now()
+    };
+    const seqAtPush=_localChangeSeq;
+    _lastKnownUpdatedAt=payload.updatedAt; // set before the write so our own echo is recognized and skipped
+    await _fbRef.set(fbSanitizeKeys(payload));
+    _syncedChangeSeq=seqAtPush;
+    updateSyncBadge("synced", new Date(payload.updatedAt).toLocaleTimeString());
+  }catch(err){
+    console.warn("Cloud sync (push) failed:", err);
+    updateSyncBadge("offline");
+  }
+}
+
+// Live cross-device sync: any other device's save shows up here within moments.
+async function startRealtimeSync(){
+  if(!firebaseReady()) return;
+  await ensureFirebaseAuth();
+  _fbRef.on("value", snap=>{
+    const data=snap.val();
+    if(!data || data.updatedAt===_lastKnownUpdatedAt) return; // ignore our own echo / empty node
+    applyRemoteData(data);
+    updateSyncBadge("synced", new Date(data.updatedAt).toLocaleTimeString());
+  });
+}
+
+function manualSync(){
+  if(!firebaseReady()){
+    alert("Cloud sync isn't configured yet.\n\nMake sure you have an internet connection (Firebase SDK loads from gstatic.com) and that FIREBASE_CONFIG near the top of the <script> tag is filled in, then reload.");
+    return;
+  }
+  pullFromCloud();
+}
+
+/* ---------- helpers ---------- */
+function esc(s){ return (s==null?"":String(s)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+// Sub-sections under Knowledge whose definitions must start BLANK for every business unit — no
+// canned/generic wording is assumed on a unit's behalf. Each unit's Admin has to type these in
+// themselves under Admin → Definitions & Weights (per business unit); once they do, it's saved as
+// that unit's own definition the same way every other definition edit auto-saves.
+const BLANK_BY_DEFAULT_SUBS=[{sec:"A",sub:"prof"},{sec:"A",sub:"jobreq"}];
+function cloneFramework(){
+  const fw=JSON.parse(JSON.stringify(DATA.FRAMEWORK));
+  // weight lives on the sub-section itself (e.g. "Education"), not on each a–e choice.
+  // Across the whole framework, all sub-section weights together sum to 100.
+  const totalSubs=fw.reduce((n,s)=>n+s.subs.length,0);
+  const w=100/totalSubs;
+  fw.forEach(sec=>sec.subs.forEach(sub=>{
+    sub.weight=w;
+    const blank=BLANK_BY_DEFAULT_SUBS.some(x=>x.sec===sec.id&&x.sub===sub.id);
+    sub.choices.forEach(c=>{ delete c.weight; if(blank) c.def=""; });
+  }));
+  return fw;
+}
+function defaultConfig(){ return {
+  frameworks:Object.fromEntries(DATA.DEFAULT_BUSINESS_UNITS.map(bu=>[bu,cloneFramework()])),
+  families:JSON.parse(JSON.stringify(DATA.DEFAULT_FAMILIES)).map((f,i)=>Object.assign({},f,{profStandard:i+1})),
+  base:DATA.BASE_MULTIPLIER,
+  jg:JSON.parse(JSON.stringify(DATA.DEFAULT_JG)),
+  businessUnits:[...DATA.DEFAULT_BUSINESS_UNITS],
+  roleExpectations:Object.fromEntries(DATA.DEFAULT_BUSINESS_UNITS.map(bu=>[bu,{}])),
+  employees:[],
+  competencyImportance:Object.fromEntries(DATA.DEFAULT_BUSINESS_UNITS.map(bu=>[bu,{}])),
+  devPlan:{conversationalPlanner:null,trainingPrograms:{}},
+  // Sign-in accounts — {id, username, passwordHash, role}. role is "Admin" (full access, including
+  // this Users panel) or "Evaluator" (Evaluate/Development/Report only). Starts EMPTY on purpose: no
+  // password is ever hardcoded in this file. The first person to open the tool is walked through
+  // creating the first Admin account themselves (see viewFirstRunSetup) instead.
+  users:[],
+};}
+// Fills in any units missing a roleExpectations bucket — keeps old saved configs working.
+function ensureRoleExpShape(){
+  if(!state.cfg.roleExpectations) state.cfg.roleExpectations={};
+  state.cfg.businessUnits.forEach(u=>{ if(!state.cfg.roleExpectations[u]) state.cfg.roleExpectations[u]={}; });
+}
+// Fills in any units missing a competencyImportance bucket — keeps old saved configs working.
+// Shape is bu -> jobGradeFamilyId -> competencyKey -> {value,locked}, so Admin can set a different
+// Importance Rating per job grade family (e.g. Specialist JG1–JG3 vs Generalist JG4–JG6) within each
+// business unit, not just one rating for the whole unit.
+// A rating leaf always looks like {value,locked} — a family bucket never does (COMP_ITEMS has no
+// "value" or "locked" key), so checking the VALUE's shape tells legacy entries apart from migrated
+// family buckets. Checking key names instead (e.g. against COMP_ITEMS keys) is NOT safe here: a job
+// grade family id can collide with a competency key (the "lead" family and the "lead"/Leadership
+// competency both use that string), which would make this function re-"migrate" — and corrupt — an
+// already-migrated family bucket every time it's called again after the first.
+function looksLikeRatingLeaf(v){ return !!v && typeof v==="object" && ("value" in v || "locked" in v); }
+function ensureImportanceShape(){
+  if(!state.cfg.competencyImportance) state.cfg.competencyImportance={};
+  const famIds=(state.cfg.families||[]).map(f=>f.id);
+  state.cfg.businessUnits.forEach(u=>{
+    if(!state.cfg.competencyImportance[u]) state.cfg.competencyImportance[u]={};
+    const bucket=state.cfg.competencyImportance[u];
+    // Migrate the legacy flat shape (bu -> competencyKey -> {value,locked}, before Importance was
+    // split per job grade family) by applying whatever was configured to every family, so ratings
+    // set before this change keep taking effect everywhere instead of silently resetting to 0.
+    const legacyKeys=Object.keys(bucket).filter(k=>looksLikeRatingLeaf(bucket[k]));
+    if(legacyKeys.length){
+      const legacy={};
+      legacyKeys.forEach(k=>{ legacy[k]=bucket[k]; delete bucket[k]; });
+      famIds.forEach(fid=>{ bucket[fid]=Object.assign({},legacy,bucket[fid]||{}); });
+    }
+    famIds.forEach(fid=>{ if(!bucket[fid]) bucket[fid]={}; });
+  });
+}
+function getImportanceCfg(bu,famId,key){ ensureImportanceShape(); return ((state.cfg.competencyImportance[bu]||{})[famId]||{})[key]||null; }
+function setImportanceCfg(bu,famId,key,patch){ ensureImportanceShape(); const bucket=state.cfg.competencyImportance[bu]; if(!bucket[famId])bucket[famId]={}; const cur=bucket[famId][key]||{value:0,locked:false}; bucket[famId][key]=Object.assign({},cur,patch); scheduleSave(); }
+// Which job grade family a Job Grade number belongs to (e.g. JG2 -> "specialist"), per the Grade
+// Bands table under Admin → Family Multipliers / Grade Bands.
+function familyIdForJG(jgNum){ if(jgNum==null) return null; const row=state.cfg.jg.find(r=>r.jg===jgNum); return row?row.fam:null; }
+// Human-readable "JG1–JG3" style range for a job grade family, derived from the Grade Bands table.
+function familyJGRange(famId){
+  const nums=state.cfg.jg.filter(r=>r.fam===famId).map(r=>r.jg);
+  if(!nums.length) return "";
+  const lo=Math.min(...nums), hi=Math.max(...nums);
+  return lo===hi?`JG${lo}`:`JG${lo}–JG${hi}`;
+}
+function ensureEmployeesShape(){ if(!Array.isArray(state.cfg.employees)) state.cfg.employees=[]; }
+// Fills in the Development Plan bucket (Conversational Planner form + per-competency training program lists) — keeps old saved configs working.
+function ensureDevPlanShape(){
+  if(!state.cfg.devPlan) state.cfg.devPlan={conversationalPlanner:null,trainingPrograms:{}};
+  if(!state.cfg.devPlan.trainingPrograms) state.cfg.devPlan.trainingPrograms={};
+  // Migrate legacy flat "competency -> [training names]" lists (from before job-family
+  // categorization existed) into the "_all" bucket, which still applies to every job family.
+  Object.keys(state.cfg.devPlan.trainingPrograms).forEach(k=>{
+    const v=state.cfg.devPlan.trainingPrograms[k];
+    if(Array.isArray(v)) state.cfg.devPlan.trainingPrograms[k]={_all:v};
+  });
+}
+// Runs every ensure*Shape() migration/safety-net in one call — used by both init() (loading a local
+// snapshot) and applyRemoteData() (adopting a Firebase snapshot from another device), so an older or
+// partial config from either source gets repaired the same way before the app relies on it.
+function ensureUsersShape(){ if(!Array.isArray(state.cfg.users)) state.cfg.users=[]; }
+function ensureAllShapes(){
+  ensureFamilyProfStandards();
+  ensureJGShape();
+  ensureRoleExpShape();
+  ensureImportanceShape();
+  ensureEmployeesShape();
+  ensureDevPlanShape();
+  ensureUsersShape();
+}
+function findUserByUsername(name){
+  ensureUsersShape();
+  const n=String(name||"").trim().toLowerCase();
+  return state.cfg.users.find(u=>String(u.username||"").toLowerCase()===n)||null;
+}
+function findUserById(id){ ensureUsersShape(); return state.cfg.users.find(u=>String(u.id)===String(id))||null; }
+function adminAccountCount(){ ensureUsersShape(); return state.cfg.users.filter(u=>u.role==="Admin").length; }
+function getRoleExp(bu,jg){ return (state.cfg.roleExpectations&&state.cfg.roleExpectations[bu]&&state.cfg.roleExpectations[bu][jg])||""; }
+function setRoleExp(bu,jg,text){ ensureRoleExpShape(); state.cfg.roleExpectations[bu][jg]=text; scheduleSave(); }
+function defaultSelections(fw){ return {}; }
+// Keeps old saved configs working — backfills a proficiency standard (1–5) for any family missing one.
+function ensureFamilyProfStandards(){
+  if(!Array.isArray(state.cfg.families))return;
+  state.cfg.families.forEach((f,i)=>{ if(f.profStandard==null||isNaN(Number(f.profStandard))) f.profStandard=i+1; });
+}
+// Fills in any Job Grade band missing from state.cfg.jg for a grade the "Target / aspired job
+// grade" picker actually offers (TARGET_JG_OPTIONS goes up to JG17; the default JG band table only
+// ever shipped up to JG15). Without a row here for a given target grade, its job family can't be
+// resolved (famId silently comes back null), which means a training program uploaded under a
+// SPECIFIC job family — not "All Families" — can never be found for anyone targeting that grade,
+// even once their Gap Evaluation is -5 or worse and every other condition is met. Each missing
+// grade inherits the family of the nearest lower grade already on file (so a brand-new top grade
+// falls under the same, highest-tier family) and continues the score band right after it.
+function ensureJGShape(){
+  if(!Array.isArray(state.cfg.jg)) state.cfg.jg=[];
+  const maxOption = TARGET_JG_OPTIONS[TARGET_JG_OPTIONS.length-1];
+  for(let jg=1; jg<=maxOption; jg++){
+    if(state.cfg.jg.some(r=>r.jg===jg)) continue;
+    const prev = state.cfg.jg.filter(r=>r.jg<jg).sort((a,b)=>a.jg-b.jg).pop();
+    const fam = prev ? prev.fam : ((state.cfg.families[0]&&state.cfg.families[0].id)||"");
+    const min = prev ? prev.max+1 : (jg-1)*1000+1;
+    const max = min+999;
+    state.cfg.jg.push({jg, min, max, fam});
+  }
+  state.cfg.jg.sort((a,b)=>a.jg-b.jg);
+}
+
+/* ---------- state ---------- */
+let state = { cfg:defaultConfig(), bu:DATA.DEFAULT_BUSINESS_UNITS[0], sessions:{}, tab:"evaluate", currentEmployeeId:"" };
+let openSecs = {};
+let adminPanel = "weights";
+let adminOpenSec = null;
+let adminRoleExpUnit = null; // which department's role expectations the admin panel is editing
+let adminEditingEmployeeId = null; // employee._id currently being edited in the manual employee form (null = adding new)
+function emptyEmployeeForm(){ return {lastName:"",firstName:"",middleName:"",position:"",jobGrade:"",department:""}; }
+let adminEmployeeForm = emptyEmployeeForm();
+let adminTPCompKey = null; // which competency the manual Training Program editor is currently showing
+let adminTPFamId = null;   // which job family (or "_all") the manual Training Program editor is currently showing
+async function sha256Hex(str){
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+
+/* ---------- sign-in (per-user account, SHA-256 hashed password) ----------
+   Replaces the old single shared "Admin password": every person gets their own username +
+   password, and Admin accounts can add/edit/remove other accounts under Admin → Users & Access.
+   No password (or default password) is ever hardcoded here — state.cfg.users starts empty, and the
+   very first person to open the tool creates the first Admin account themselves (see
+   viewFirstRunSetup). Only a one-way SHA-256 hash of each password is ever stored, here or in
+   Firebase — same as the rest of this file's auth story. Sign-in state itself (authUser) is kept
+   per DEVICE/browser (a local KEY_SESSION entry, not part of state.cfg), while the account list
+   (state.cfg.users) syncs everywhere exactly like every other Admin setting. */
+const KEY_SESSION="progression:session:v1";
+let authUser=null;   // {id,username,role} once signed in on this device, else null
+let authError="";
+let loginForm={username:"",password:""};
+let setupForm={username:"",password:"",confirm:""};
+let adminUserForm={username:"",password:"",confirm:"",role:"Evaluator"};
+let adminEditingUserId=null; // which account's password-reset form is open in Admin → Users & Access
+
+async function attemptFirstAdminSetup(){
+  const username=(setupForm.username||"").trim();
+  const pwd=setupForm.password||"", confirmPwd=setupForm.confirm||"";
+  authError="";
+  if(!username){ authError="Enter a username."; renderView(); return; }
+  if(!pwd || pwd.length<6){ authError="Password should be at least 6 characters."; renderView(); return; }
+  if(pwd!==confirmPwd){ authError="Passwords don't match."; renderView(); return; }
+  ensureUsersShape();
+  const rec={id:"user_"+Date.now()+"_"+Math.random().toString(36).slice(2,7), username, passwordHash:await sha256Hex(pwd), role:"Admin"};
+  state.cfg.users.push(rec);
+  scheduleSave();
+  authUser={id:rec.id, username:rec.username, role:rec.role};
+  try{ localStorage.setItem(KEY_SESSION, JSON.stringify({id:rec.id})); }catch(e){}
+  setupForm={username:"",password:"",confirm:""};
+  renderTabs(); renderAuthBar(); renderView();
+}
+async function attemptLogin(){
+  const username=(loginForm.username||"").trim();
+  const pwd=loginForm.password||"";
+  authError="";
+  const rec=findUserByUsername(username);
+  if(!rec){ authError="No account with that username."; renderView(); return; }
+  const hash=await sha256Hex(pwd);
+  if(hash!==rec.passwordHash){ authError="Incorrect password."; renderView(); return; }
+  authUser={id:rec.id, username:rec.username, role:rec.role};
+  try{ localStorage.setItem(KEY_SESSION, JSON.stringify({id:rec.id})); }catch(e){}
+  loginForm={username:"",password:""};
+  renderTabs(); renderAuthBar(); renderView();
+}
+function doLogout(){
+  authUser=null;
+  try{ localStorage.removeItem(KEY_SESSION); }catch(e){}
+  state.tab="evaluate";
+  renderTabs(); renderAuthBar(); renderView();
+}
+// ---- Admin → Users & Access: add/edit/remove accounts (Admin-only; each check below is defense in
+// depth — the Users panel is already unreachable for a non-Admin since renderTabs()/renderView() never
+// expose the Admin tab to them at all). ----
+async function adminAddUser(){
+  if(!authUser||authUser.role!=="Admin") return;
+  ensureUsersShape();
+  const f=adminUserForm;
+  const username=(f.username||"").trim();
+  const pwd=f.password||"", confirmPwd=f.confirm||"";
+  if(!username){ alert("Enter a username."); return; }
+  if(findUserByUsername(username)){ alert("That username is already taken."); return; }
+  if(!pwd || pwd.length<6){ alert("Password should be at least 6 characters."); return; }
+  if(pwd!==confirmPwd){ alert("Passwords don't match."); return; }
+  state.cfg.users.push({id:"user_"+Date.now()+"_"+Math.random().toString(36).slice(2,7), username, passwordHash:await sha256Hex(pwd), role:f.role==="Admin"?"Admin":"Evaluator"});
+  scheduleSave();
+  adminUserForm={username:"",password:"",confirm:"",role:"Evaluator"};
+  renderView();
+}
+async function adminResetUserPassword(userId,pwd,confirmPwd){
+  if(!authUser||authUser.role!=="Admin") return;
+  const rec=findUserById(userId);
+  if(!rec) return;
+  if(!pwd || pwd.length<6){ alert("New password should be at least 6 characters."); return; }
+  if(pwd!==confirmPwd){ alert("Passwords don't match."); return; }
+  rec.passwordHash=await sha256Hex(pwd);
+  scheduleSave();
+  adminEditingUserId=null;
+  renderView();
+  alert(`Password updated for "${rec.username}".`);
+}
+function adminSetUserRole(userId,role){
+  if(!authUser||authUser.role!=="Admin") return;
+  const rec=findUserById(userId);
+  if(!rec) return;
+  const newRole=role==="Admin"?"Admin":"Evaluator";
+  if(rec.role==="Admin" && newRole!=="Admin" && adminAccountCount()<=1){
+    alert("This is the only remaining Admin account — make another account an Admin before removing this one's Admin access.");
+    renderView();
+    return;
+  }
+  rec.role=newRole;
+  scheduleSave();
+  renderView();
+}
+function adminDeleteUser(userId){
+  const rec=findUserById(userId);
+  if(!rec) return;
+  if(!authUser||authUser.role!=="Admin") return;
+  if(String(rec.id)===String(authUser.id)){ alert("You can't delete the account you're currently signed in as."); return; }
+  if(rec.role==="Admin" && adminAccountCount()<=1){ alert("This is the only remaining Admin account and can't be deleted — make another account an Admin first."); return; }
+  if(!confirm(`Remove the account "${rec.username}"? They won't be able to sign in anymore.`)) return;
+  state.cfg.users=state.cfg.users.filter(u=>String(u.id)!==String(userId));
+  scheduleSave();
+  renderView();
+}
+
+/* ---------- derived ---------- */
+const framework = ()=> state.cfg.frameworks[state.bu] || cloneFramework();
+function familyMultipliers(){ let cum=1; return state.cfg.families.map(f=>{ cum*=f.factor; return Object.assign({},f,{mult:state.cfg.base*cum}); }); }
+// The assessment session (job factor selections, evidence, GWC, Competency Gap ratings — every
+// piece of a single evaluation) is keyed by WHICH EMPLOYEE is currently selected, not by business
+// unit alone. Previously this was keyed only by state.bu, so every employee sharing a unit
+// silently shared — and overwrote — the same "Actual Evaluation Rating" and Competency Gap data.
+// With no employee selected yet, a per-unit scratch/draft bucket is used instead so the form still
+// has somewhere to write to, but it's never mistaken for a real employee's saved evaluation.
+function sessionKey(){ return state.currentEmployeeId ? ("emp:"+state.currentEmployeeId) : ("draft:"+state.bu); }
+const session = ()=> state.sessions[sessionKey()] || {};
+const selections = ()=> session().selections || {};
+const evidence = ()=> session().evidence || {};
+const emp = ()=> Object.assign({name:"",position:"",currentJG:"",targetJG:"",assessedBy:"",employeeId:""}, session().emp||{});
+const TARGET_JG_OPTIONS=Array.from({length:17},(_,i)=>i+1); // JG1–JG17 dropdown, independent of the scoring bands
+
+/* ---------- competency gap / GWC (individual assessment) ---------- */
+const COMP_ITEMS=[
+  // Job Knowledge and Skills is anchored to Section C's "Scope of Work" sub-section (C.scope) —
+  // was Section A's "Job Requirements (Proficiency)" (A.jobreq) before this was relinked.
+  {key:"knowledge",label:"Job Knowledge and Skills",sec:"C",sub:"scope"},
+  {key:"solve",label:"Decision Making / Problem Solving",sec:"B",sub:"solve"},
+  {key:"comm",label:"Communication",sec:"B",sub:"comm"},
+  {key:"plan",label:"Planning and Organizing",sec:"B",sub:"plan"},
+  {key:"lead",label:"Leadership",sec:"B",sub:"lead"},
+  {key:"cust",label:"Customer Focus",sec:"B",sub:"cust"}
+];
+const DEV_ACTIONS=[
+  ["Reminders","Counseling","Coaching / Re-orientation"],
+  ["Counseling","Coaching / Re-orientation","Re-training / Close Supervision"],
+  ["Re-orientation","Re-training / Close Supervision","Pull-out for Extensive Training / Job Transfer"]
+];
+function gapBucket(absGap){ return absGap<=3?0:(absGap<=6?1:2); }
+// Development Plan is anchored to the raw Gap Evaluation result (not the absolute bucket used for the Opportunity Plan):
+// -1 to -4 -> admin-provided downloadable "Conversational Planner" form; -5 and beyond -> per-competency training program list.
+function gapDevKind(gap){
+  if(gap==null) return null;
+  if(gap<=-1&&gap>=-4) return "form";
+  if(gap<=-5) return "training";
+  return null;
+}
+function parseJGNumber(s){ if(!s)return null; const m=String(s).match(/(\d+)/); return m?parseInt(m[1],10):null; }
+function standardFor(jgNum){ if(jgNum==null)return null; const row=state.cfg.jg.find(r=>r.jg===jgNum); if(!row)return null; const fi=famIndex(row.fam); if(fi<0)return null; const f=state.cfg.families[fi]; const v=f&&f.profStandard!=null?Number(f.profStandard):NaN; return isNaN(v)?fi+1:v; }
+// Proficiency Standard is locked to the employee's target/aspired Job Grade band:
+// JG1–JG3 = 1, JG4–JG6 = 2, JG7–JG9 = 3, JG10–JG12 = 4, JG13–JG17 = 5.
+function standardForTargetJG(jgNum){
+  if(jgNum==null) return null;
+  if(jgNum<=3) return 1;
+  if(jgNum<=6) return 2;
+  if(jgNum<=9) return 3;
+  if(jgNum<=12) return 4;
+  return 5;
+}
+// Effective Importance Rating for a competency item in the current unit and job grade family —
+// locked by admin if configured. Family is resolved from the employee's assessed Job Grade (target
+// if set, else current), same as the Job Progression Standard lookup elsewhere on this tab.
+function effectiveImportance(key){
+  const {jgNum}=resolveAssessJG();
+  const famId=familyIdForJG(jgNum);
+  const cfg=famId?getImportanceCfg(state.bu,famId,key):null;
+  if(cfg&&cfg.locked) return {value:Number(cfg.value)||0, locked:true};
+  const it=itemState(key);
+  return {value:Number(it.importance)||0, locked:false};
+}
+function resolveAssessJG(){ const e=emp(); const t=parseJGNumber(e.targetJG); const c=parseJGNumber(e.currentJG); return {jgNum:(t!=null?t:c), src:(t!=null?"target":(c!=null?"current":null))}; }
+function defaultCompetency(){ return {gwc:{get:"",want:"",capacity:"",notes:""},items:{},devNotes:"",signoff:{}}; }
+function competency(){
+  const c=session().competency||{};
+  return {
+    gwc:Object.assign({get:"",want:"",capacity:"",notes:""},c.gwc||{}),
+    items:c.items||{},
+    devNotes:c.devNotes||"",
+    signoff:Object.assign({gapBy:"",gapDate:"",approvedBy1:"",empSig1:"",dateDiscussed1:"",effectiveness:"",evalBy:"",evalDate:"",approvedBy2:"",empSig2:"",dateDiscussed2:""},c.signoff||{})
+  };
+}
+function itemState(key){ return Object.assign({importance:0,actual:0,remark:""}, (competency().items||{})[key]||{}); }
+function setGwc(field,val){ const c=competency(); c.gwc[field]=(c.gwc[field]===val)?"":val; patchSession({competency:c}); }
+function setGwcNotes(v){ const c=competency(); c.gwc.notes=v; patchSession({competency:c}); }
+function setItemField(key,field,val){ const c=competency(); const items=Object.assign({},c.items); items[key]=Object.assign({importance:0,actual:0},items[key]||{},{[field]:val}); c.items=items; patchSession({competency:c}); }
+function resetAllCompetencyItems(){ const c=competency(); c.items={}; patchSession({competency:c}); }
+function setDevNotes(v){ const c=competency(); c.devNotes=v; patchSession({competency:c}); }
+function setSignoff(field,val){ const c=competency(); c.signoff[field]=val; patchSession({competency:c}); }
+function computeBreakdown(){
+  const mults=familyMultipliers(), sel=selections(); const rows=[]; let total=0,weightSum=0;
+  const tierMix=mults.map(()=>0);
+  framework().forEach(sec=>sec.subs.forEach(sub=>{
+    const key=sec.id+"."+sub.id; const cid=sel[key];
+    const ch=cid?sub.choices.find(c=>c.id===cid):null;
+    let famIdx=null,mult=0,score=0,w=0;
+    if(ch){ famIdx=cIndex(ch.id); mult=(mults[famIdx]||{}).mult||0; w=Number(sub.weight)||0; score=w*mult; total+=score; weightSum+=w; if(famIdx>=0)tierMix[famIdx]++; }
+    rows.push({sec,sub,ch,weight:w,famIdx,mult,score});
+  }));
+  return {rows,total:Math.round(total),weightSum,tierMix,mults};
+}
+const lookupJG = (score)=> score>0 ? (state.cfg.jg.find(r=>score>=r.min&&score<=r.max)||null) : null;
+const famName = (id)=>{ const f=state.cfg.families.find(x=>x.id===id); return f?f.name:id; };
+const famIndex = (id)=> state.cfg.families.findIndex(x=>x.id===id);
+
+/* ---------- persistence ---------- */
+let saveTimer=null;
+function setSync(s){ const el=document.getElementById("sync"); if(!el)return;
+  if(s==="saving"){ el.textContent="Saving…"; el.style.color="var(--faint)"; }
+  else if(s==="synced"){ el.textContent="Synced ✓"; el.style.color="var(--accent)"; }
+  else { el.textContent="Auto-saves"; el.style.color="var(--faint)"; }
+}
+function scheduleSave(){
+  markLocalChange(); // flags this edit as "not yet pushed" so an in-flight cloud pull can't clobber it
+  setSync("saving"); clearTimeout(saveTimer); saveTimer=setTimeout(async()=>{
+    await Promise.all([saveKey(KEY_CFG,state.cfg),saveKey(KEY_BU,state.bu),saveKey(KEY_SEL,state.sessions),saveKey(KEY_CUR_EMP,state.currentEmployeeId)]);
+    setSync("synced"); setTimeout(()=>setSync("idle"),1500);
+  },400);
+  schedulePush(); // separately debounced push to Firebase, so every device sees this edit
+}
+
+/* ---------- session mutations ---------- */
+function ensureSession(){
+  const k=sessionKey();
+  const s=state.sessions[k];
+  if(!s || !s.selections || Object.keys(s.selections).length===0){
+    state.sessions[k]=Object.assign({emp:{},evidence:{},competency:{}}, s||{}, {selections:defaultSelections(framework())});
+  } else { if(!s.emp)s.emp={}; if(!s.evidence)s.evidence={}; if(!s.competency)s.competency={}; }
+}
+function patchSession(patch){
+  const k=sessionKey();
+  const cur=state.sessions[k]||{selections:{},emp:{},evidence:{},competency:{}};
+  state.sessions[k]=Object.assign({selections:{},emp:{},evidence:{},competency:{}},cur,patch);
+  scheduleSave();
+}
+// One-time upgrade for sessions saved before this fix: they were keyed by a bare business-unit
+// name (e.g. "Operations") instead of "emp:<id>" / "draft:<bu>", which is exactly what let every
+// employee sharing a unit silently overwrite each other's Actual Evaluation Rating. Anything still
+// sitting under a bare BU-name key is legacy data — move it into whichever employee it already
+// names (or into that unit's draft bucket if it never had one) so nothing on file gets lost.
+function migrateLegacySessions(){
+  Object.keys(state.sessions).forEach(k=>{
+    if(k.indexOf("emp:")===0 || k.indexOf("draft:")===0) return;
+    const legacy=state.sessions[k];
+    delete state.sessions[k];
+    if(!legacy) return;
+    const empId=legacy.emp&&legacy.emp.employeeId;
+    const newKey=empId?("emp:"+empId):("draft:"+k);
+    if(!state.sessions[newKey]) state.sessions[newKey]=legacy;
+  });
+}
+function pick(sec,sub,ch){ const sel=Object.assign({},selections()); const key=sec+"."+sub; if(sel[key]===ch){ delete sel[key]; } else { sel[key]=ch; } patchSession({selections:sel}); }
+function setEvidence(sec,sub,t){ const ev=Object.assign({},evidence()); ev[sec+"."+sub]=t; patchSession({evidence:ev}); }
+function setEmpField(k,v){ const e=Object.assign({},emp()); e[k]=v; patchSession({emp:e}); }
+function setEmpFields(patch){ const e=Object.assign({},emp(),patch); patchSession({emp:e}); }
+/* ---------- employee master list (imported from Excel) ---------- */
+function employeeFullName(rec){
+  const last=(rec.lastName||"").trim(), first=(rec.firstName||"").trim(), mid=(rec.middleName||"").trim();
+  const midInitial = mid ? (mid.charAt(0).toUpperCase()+".") : "";
+  const parts=[last,first].filter(Boolean).join(", ");
+  return [parts,midInitial].filter(Boolean).join(" ")||"(unnamed)";
+}
+function employeeOptionLabel(rec){
+  // Only the name shows in the dropdown itself — Position and Job Grade stay
+  // hidden there and instead auto-populate their own placeholder fields
+  // (via applyEmployeeSelection) once a name is picked, so the list doesn't
+  // get cluttered/confusing with details that belong elsewhere on the form.
+  return employeeFullName(rec);
+}
+function sameUnit(a,b){ return String(a||"").trim().toLowerCase()===String(b||"").trim().toLowerCase(); }
+function employeesForCurrentUnit(){
+  ensureEmployeesShape();
+  return state.cfg.employees.filter(r=>!r.department||sameUnit(r.department,state.bu));
+}
+function findEmployeeById(id){ ensureEmployeesShape(); return state.cfg.employees.find(r=>String(r._id)===String(id))||null; }
+function applyEmployeeSelection(id){
+  const rec=findEmployeeById(id);
+  // Which employee is selected here decides which saved session (job factor selections, GWC,
+  // Competency Gap ratings — everything the Evaluate/Development tabs read from) gets loaded and
+  // written to from this point on. Switching this BEFORE touching emp()/setEmpFields() below is
+  // what makes the whole form — including "Actual Evaluation Rating" in the Competency Gap
+  // table — reload as that specific employee's own evaluation instead of whoever was open before.
+  state.currentEmployeeId = rec ? rec._id : "";
+  ensureSession();
+  if(!rec){ setEmpFields({employeeId:""}); return; }
+  const newCurrentJG = rec.jobGrade? ("JG"+String(rec.jobGrade).replace(/[^0-9]/g,"")) : "";
+  const newJGNum=parseJGNumber(newCurrentJG);
+  const existingTargetNum=parseJGNumber(emp().targetJG);
+  // Selecting a new employee re-anchors the current job grade — clear a target/aspired grade that's now below it.
+  const clearTarget = newJGNum!=null && existingTargetNum!=null && existingTargetNum<newJGNum;
+  setEmpFields(Object.assign({
+    employeeId:rec._id,
+    name:employeeFullName(rec),
+    position:rec.position||"",
+    currentJG:newCurrentJG
+  }, clearTarget?{targetJG:""}:{}));
+}
+function importEmployees(file){
+  if(typeof XLSX==="undefined"){ alert("Excel import isn't available right now — check your connection and try again."); return; }
+  const reader=new FileReader();
+  reader.onload=()=>{
+    let wb;
+    try{ wb=XLSX.read(reader.result,{type:"array"}); }catch(e){ alert("Couldn't read that file — make sure it's a valid .xlsx file."); return; }
+    const sheetName=wb.SheetNames.find(n=>/employee|master|list|roster/i.test(n))||wb.SheetNames[0];
+    const ws=wb.Sheets[sheetName];
+    if(!ws){ alert("Couldn't read that file."); return; }
+    const rows=XLSX.utils.sheet_to_json(ws,{defval:""});
+    if(!rows.length){ alert("That file doesn't contain any employee rows."); return; }
+    const findKey=(row,re)=>Object.keys(row).find(k=>re.test(k));
+    const recs=rows.map(row=>{
+      const lastKey=findKey(row,/^last\s*name$|^last$|surname/i);
+      const firstKey=findKey(row,/^first\s*name$|^first$|given/i);
+      const midKey=findKey(row,/^middle\s*name$|^middle$/i);
+      const posKey=findKey(row,/position|job\s*title|title/i);
+      const jgKey=findKey(row,/job\s*grade|^jg$/i);
+      const deptKey=findKey(row,/department|unit|business\s*unit/i);
+      return {
+        lastName:String((lastKey?row[lastKey]:"")??"").trim(),
+        firstName:String((firstKey?row[firstKey]:"")??"").trim(),
+        middleName:String((midKey?row[midKey]:"")??"").trim(),
+        position:String((posKey?row[posKey]:"")??"").trim(),
+        jobGrade:String((jgKey?row[jgKey]:"")??"").replace(/[^0-9]/g,"").trim(),
+        department:String((deptKey?row[deptKey]:"")??"").trim()
+      };
+    }).filter(r=>r.lastName||r.firstName);
+    if(!recs.length){ alert("Couldn't find recognizable Last Name / First Name columns in that file."); return; }
+    if(!confirm(`Import ${recs.length} employee(s)? This will replace the current employee list.`)) return;
+    ensureEmployeesShape();
+    state.cfg.employees=recs.map((r,i)=>Object.assign({_id:"emp_"+Date.now()+"_"+i},r));
+    scheduleSave();
+    renderView();
+  };
+  reader.onerror=()=>alert("Couldn't read that file.");
+  reader.readAsArrayBuffer(file);
+}
+function clearEmployees(){
+  if(!confirm("Remove the entire imported employee list? This can't be undone.")) return;
+  state.cfg.employees=[];
+  scheduleSave();
+  renderView();
+}
+// ---- Manual employee add / edit / delete (alongside the Excel import above) ----
+function saveEmployeeManual(){
+  ensureEmployeesShape();
+  const f=adminEmployeeForm;
+  const lastName=(f.lastName||"").trim(), firstName=(f.firstName||"").trim();
+  if(!lastName && !firstName){ alert("Enter at least a last name or first name."); return; }
+  const rec={
+    lastName, firstName,
+    middleName:(f.middleName||"").trim(),
+    position:(f.position||"").trim(),
+    jobGrade:(f.jobGrade||"").replace(/[^0-9]/g,"").trim(),
+    department:(f.department||"").trim()
+  };
+  if(adminEditingEmployeeId!=null){
+    const idx=state.cfg.employees.findIndex(r=>String(r._id)===String(adminEditingEmployeeId));
+    if(idx>=0) state.cfg.employees[idx]=Object.assign({},state.cfg.employees[idx],rec);
+  } else {
+    state.cfg.employees.push(Object.assign({_id:"emp_"+Date.now()+"_"+Math.random().toString(36).slice(2,7)},rec));
+  }
+  adminEditingEmployeeId=null;
+  adminEmployeeForm=emptyEmployeeForm();
+  scheduleSave();
+  renderView();
+}
+function startEditEmployee(id){
+  const rec=findEmployeeById(id);
+  if(!rec) return;
+  adminEditingEmployeeId=id;
+  adminEmployeeForm={lastName:rec.lastName||"",firstName:rec.firstName||"",middleName:rec.middleName||"",position:rec.position||"",jobGrade:rec.jobGrade||"",department:rec.department||""};
+  renderView();
+}
+function cancelEditEmployee(){
+  adminEditingEmployeeId=null;
+  adminEmployeeForm=emptyEmployeeForm();
+  renderView();
+}
+function deleteEmployeeManual(id){
+  const rec=findEmployeeById(id);
+  if(!rec) return;
+  if(!confirm(`Remove ${employeeFullName(rec)} from the employee list?`)) return;
+  state.cfg.employees=state.cfg.employees.filter(r=>String(r._id)!==String(id));
+  if(String(adminEditingEmployeeId)===String(id)){ adminEditingEmployeeId=null; adminEmployeeForm=emptyEmployeeForm(); }
+  // Their saved evaluation session goes with them — otherwise it lingers under "emp:<id>" forever,
+  // orphaned from any real employee, and could resurface confusingly if that ID were ever reused.
+  delete state.sessions["emp:"+id];
+  if(String(state.currentEmployeeId)===String(id)) state.currentEmployeeId="";
+  scheduleSave();
+  renderView();
+}
+// Blank .xlsx template with the exact headers importEmployees() looks for — admin fills this in and re-imports it to update the list.
+function downloadEmployeeTemplate(){
+  if(typeof XLSX==="undefined"){ alert("Excel export isn't available right now — check your connection and try again."); return; }
+  const ws=XLSX.utils.aoa_to_sheet([["Last Name","First Name","Middle Name","Position","Job Grade","Department"]]);
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,"Employees");
+  XLSX.writeFile(wb,"employee-list-template.xlsx");
+}
+/* ---------- DEVELOPMENT PLAN (Conversational Planner form + training program lists) ---------- */
+// Stores the admin-uploaded Conversational Planner as a base64 data URL so evaluators can download it with no server round-trip.
+function uploadConversationalPlanner(file){
+  ensureDevPlanShape();
+  const reader=new FileReader();
+  reader.onload=()=>{
+    state.cfg.devPlan.conversationalPlanner={name:file.name,dataUrl:reader.result};
+    scheduleSave();
+    renderView();
+  };
+  reader.onerror=()=>alert("Couldn't read that file.");
+  reader.readAsDataURL(file);
+}
+function clearConversationalPlanner(){
+  if(!confirm("Remove the Conversational Planner form? Evaluators will no longer be able to download it.")) return;
+  ensureDevPlanShape();
+  state.cfg.devPlan.conversationalPlanner=null;
+  scheduleSave();
+  renderView();
+}
+// Blank .xlsx template matching what importTrainingPrograms() expects — one row per competency × job family
+// combination (job families come from the current Job Progression Standard / Family Multipliers list),
+// plus one "Any / All Families" row per competency for a program that should show up regardless of family.
+function downloadTrainingTemplate(){
+  if(typeof XLSX==="undefined"){ alert("Excel export isn't available right now — check your connection and try again."); return; }
+  const rows=[["Competency","Job Family","Training Program"]];
+  COMP_ITEMS.forEach(item=>{
+    state.cfg.families.forEach(f=>rows.push([item.label,f.name,""]));
+    rows.push([item.label,"All Families",""]);
+  });
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,"Training Programs");
+  XLSX.writeFile(wb,"training-programs-template.xlsx");
+}
+// Imports an Excel file with one row per training program, matches each row's Competency cell to a COMP_ITEMS key
+// and its Job Family cell to a job family from the Job Progression Standard (state.cfg.families) — a blank or
+// unrecognized Job Family falls back to "All Families" so the program shows up regardless of job family.
+// Replaces the matched competency+family list with everything found in the file; combinations not present in
+// the file are left untouched.
+function importTrainingPrograms(file){
+  if(typeof XLSX==="undefined"){ alert("Excel import isn't available right now — check your connection and try again."); return; }
+  const reader=new FileReader();
+  reader.onload=()=>{
+    let wb;
+    try{ wb=XLSX.read(reader.result,{type:"array"}); }catch(e){ alert("Couldn't read that file — make sure it's a valid .xlsx file."); return; }
+    const sheetName=wb.SheetNames.find(n=>/training/i.test(n))||wb.SheetNames[0];
+    const ws=wb.Sheets[sheetName];
+    if(!ws){ alert("Couldn't read that file."); return; }
+    const rows=XLSX.utils.sheet_to_json(ws,{defval:""});
+    if(!rows.length){ alert("That file doesn't contain any rows."); return; }
+    const findKey=(row,re)=>Object.keys(row).find(k=>re.test(k));
+    const grouped={}; const unmatched=new Set(); const unmatchedFam=new Set();
+    rows.forEach(row=>{
+      const compKey=findKey(row,/competenc/i);
+      const famKey=findKey(row,/job\s*family|^family$/i);
+      const progKey=findKey(row,/training|program/i);
+      const compName=String((compKey?row[compKey]:"")??"").trim();
+      const famNameRaw=String((famKey?row[famKey]:"")??"").trim();
+      const progName=String((progKey?row[progKey]:"")??"").trim();
+      if(!compName||!progName) return;
+      const item=COMP_ITEMS.find(it=>it.label.toLowerCase()===compName.toLowerCase()||it.key.toLowerCase()===compName.toLowerCase());
+      if(!item){ unmatched.add(compName); return; }
+      let famId="_all";
+      if(famNameRaw&&!/^(all|any)( families)?$/i.test(famNameRaw)){
+        const fam=state.cfg.families.find(f=>f.name.toLowerCase()===famNameRaw.toLowerCase()||f.id.toLowerCase()===famNameRaw.toLowerCase());
+        if(fam) famId=fam.id; else unmatchedFam.add(famNameRaw);
+      }
+      grouped[item.key]=grouped[item.key]||{};
+      (grouped[item.key][famId]=grouped[item.key][famId]||[]).push(progName);
+    });
+    if(!Object.keys(grouped).length){ alert("Couldn't match any rows to a competency. Use the exact competency names from the downloaded template."); return; }
+    const summary=Object.keys(grouped).map(k=>{
+      const total=Object.values(grouped[k]).reduce((n,l)=>n+l.length,0);
+      return `${COMP_ITEMS.find(it=>it.key===k).label}: ${total}`;
+    }).join("\n");
+    const warnings=[
+      unmatched.size?`Skipped unrecognized competency name(s): ${[...unmatched].join(", ")}`:"",
+      unmatchedFam.size?`Unrecognized job family name(s) treated as "All Families": ${[...unmatchedFam].join(", ")}`:""
+    ].filter(Boolean).join("\n");
+    if(!confirm(`Import training programs for:\n${summary}${warnings?`\n\n${warnings}`:""}\n\nThis replaces the current list for each matched competency + job family combination.`)) return;
+    ensureDevPlanShape();
+    Object.keys(grouped).forEach(k=>{
+      state.cfg.devPlan.trainingPrograms[k]=Object.assign({}, state.cfg.devPlan.trainingPrograms[k]||{}, grouped[k]);
+    });
+    scheduleSave();
+    renderView();
+  };
+  reader.onerror=()=>alert("Couldn't read that file.");
+  reader.readAsArrayBuffer(file);
+}
+function clearTrainingProgram(key){
+  const item=COMP_ITEMS.find(it=>it.key===key); if(!item) return;
+  if(!confirm(`Remove the training program list for "${item.label}"?`)) return;
+  ensureDevPlanShape();
+  delete state.cfg.devPlan.trainingPrograms[key];
+  scheduleSave();
+  renderView();
+}
+// ---- Manual training-program add / edit / delete, one competency + job family at a time ----
+// (alongside the bulk Excel import above, which stays as the fast way to load many at once).
+function ensureTPList(compKey,famId){
+  ensureDevPlanShape();
+  const tp=state.cfg.devPlan.trainingPrograms;
+  if(!tp[compKey]) tp[compKey]={};
+  if(!Array.isArray(tp[compKey][famId])) tp[compKey][famId]=[];
+  return tp[compKey][famId];
+}
+function addTrainingProgramManual(compKey,famId,name){
+  const n=(name||"").trim();
+  if(!n) return;
+  ensureTPList(compKey,famId).push(n);
+  scheduleSave();
+  renderView();
+}
+// Renames an existing entry in place — called on blur, not on every keystroke, so typing isn't interrupted by a re-render.
+function updateTrainingProgramManual(compKey,famId,idx,name){
+  const list=ensureTPList(compKey,famId);
+  if(idx<0||idx>=list.length) return;
+  const n=(name||"").trim();
+  if(n) list[idx]=n;
+  scheduleSave();
+}
+function deleteTrainingProgramManual(compKey,famId,idx){
+  const list=ensureTPList(compKey,famId);
+  if(idx<0||idx>=list.length) return;
+  if(!confirm(`Remove "${list[idx]}" from this list?`)) return;
+  list.splice(idx,1);
+  scheduleSave();
+  renderView();
+}
+function resetLevels(){ patchSession({selections:defaultSelections(framework())}); }
+function editFramework(updater){ const fw=state.cfg.frameworks[state.bu]||cloneFramework(); updater(fw); state.cfg.frameworks[state.bu]=fw; scheduleSave(); }
+
+/* ================= RENDER ================= */
+function renderTabs(){
+  const el=document.getElementById("tabs");
+  if(!authUser){ el.innerHTML=""; return; } // nothing to navigate to until signed in
+  const defs=[["evaluate","Evaluate"],["development","Development"],["report","Report"]];
+  if(authUser.role==="Admin") defs.push(["admin","Admin"]); // Evaluators never see this tab at all
+  el.innerHTML=defs.map(([id,lbl])=>
+    `<button class="tabbtn ${state.tab===id?"on":""}" data-tab="${id}">${lbl}</button>`).join("");
+  document.querySelectorAll("#tabs [data-tab]").forEach(b=>b.onclick=()=>{ state.tab=b.dataset.tab; renderTabs(); renderView(); });
+}
+function renderBU(){
+  const sel=document.getElementById("bu");
+  sel.innerHTML=state.cfg.businessUnits.map(u=>`<option ${u===state.bu?"selected":""}>${esc(u)}</option>`).join("");
+  sel.onchange=()=>{ state.bu=sel.value; if(!state.cfg.frameworks[state.bu])state.cfg.frameworks[state.bu]=cloneFramework(); state.currentEmployeeId=""; ensureSession(); scheduleSave(); renderView(); };
+}
+function renderAuthBar(){
+  const el=document.getElementById("authbar");
+  if(!el) return;
+  if(!authUser){ el.innerHTML=""; return; }
+  el.innerHTML=`<span class="muted">👤 ${esc(authUser.username)} · ${esc(authUser.role)}</span><button id="logoutbtn" class="btn btn-ghost" style="padding:4px 10px;font-size:11.5px">Log out</button>`;
+  const lb=document.getElementById("logoutbtn"); if(lb) lb.onclick=doLogout;
+}
+function renderView(){
+  const v=document.getElementById("view");
+  ensureUsersShape();
+  if(!authUser){
+    v.innerHTML = state.cfg.users.length ? viewLogin() : viewFirstRunSetup();
+    wireAuthScreen();
+    return;
+  }
+  // Defense in depth: an Evaluator can never land on the Admin tab even if state.tab was somehow
+  // left set to "admin" (e.g. a stale value from before their role was downgraded) — renderTabs()
+  // already never shows them the tab, this just makes sure the content itself can't render either.
+  if(state.tab==="admin" && authUser.role!=="Admin") state.tab="evaluate";
+  if(state.tab==="evaluate") v.innerHTML=viewEvaluate(), wireEvaluate();
+  else if(state.tab==="development") v.innerHTML=viewDevelopment(), wireDevelopment();
+  else if(state.tab==="report") v.innerHTML=viewReport();
+  else if(state.tab==="admin"){ v.innerHTML=viewAdmin(), wireAdmin(); }
+  if(state.tab==="report"){ const p=document.getElementById("printbtn"); if(p)p.onclick=()=>window.print(); }
+}
+function viewFirstRunSetup(){
+  return `<div class="card" style="max-width:380px;padding:28px;margin:64px auto;text-align:center">
+    <div style="font-size:26px;margin-bottom:6px">🔑</div>
+    <div class="h1" style="margin-bottom:6px">Set up the first Admin account</div>
+    <div style="font-size:12.5px;color:var(--sub);margin-bottom:18px;line-height:1.5">No accounts exist yet — nothing is pre-set. Create the first Admin account below; you'll add everyone else's accounts from Admin → Users &amp; Access afterward.</div>
+    <input id="setupUser" class="inp" placeholder="Username" autocomplete="username" style="margin-bottom:10px;text-align:center" value="${esc(setupForm.username)}"/>
+    <input id="setupPw" type="password" class="inp" placeholder="Password (min 6 characters)" autocomplete="new-password" style="margin-bottom:10px;text-align:center"/>
+    <input id="setupPw2" type="password" class="inp" placeholder="Confirm password" autocomplete="new-password" style="margin-bottom:10px;text-align:center"/>
+    ${authError?`<div style="font-size:12px;color:var(--warn);font-weight:600;margin-bottom:10px">${esc(authError)}</div>`:""}
+    <button id="setupBtn" class="btn btn-primary" style="width:100%;padding:10px;font-size:13.5px">Create Admin account</button>
+  </div>`;
+}
+function viewLogin(){
+  return `<div class="card" style="max-width:360px;padding:28px;margin:64px auto;text-align:center">
+    <div style="font-size:26px;margin-bottom:6px">🔒</div>
+    <div class="h1" style="margin-bottom:6px">Sign in</div>
+    <div style="font-size:12.5px;color:var(--sub);margin-bottom:18px;line-height:1.5">Sign in to use Role Profile. No account, or forgot your password? Ask an Admin — only an Admin can add accounts or reset a password.</div>
+    <input id="loginUser" class="inp" placeholder="Username" autocomplete="username" style="margin-bottom:10px;text-align:center" value="${esc(loginForm.username)}"/>
+    <input id="loginPw" type="password" class="inp" placeholder="Password" autocomplete="current-password" style="margin-bottom:10px;text-align:center"/>
+    ${authError?`<div style="font-size:12px;color:var(--warn);font-weight:600;margin-bottom:10px">${esc(authError)}</div>`:""}
+    <button id="loginBtn" class="btn btn-primary" style="width:100%;padding:10px;font-size:13.5px">Sign in</button>
+  </div>`;
+}
+function wireAuthScreen(){
+  if(!state.cfg.users.length){
+    const inp=document.getElementById("setupUser"), pw=document.getElementById("setupPw"), pw2=document.getElementById("setupPw2"), btn=document.getElementById("setupBtn");
+    if(inp) inp.oninput=()=>setupForm.username=inp.value;
+    if(pw) pw.oninput=()=>setupForm.password=pw.value;
+    if(pw2) pw2.oninput=()=>setupForm.confirm=pw2.value;
+    const submit=()=>attemptFirstAdminSetup();
+    if(btn) btn.onclick=submit;
+    [inp,pw,pw2].forEach(el=>{ if(el) el.onkeydown=(e)=>{ if(e.key==="Enter") submit(); }; });
+    if(inp) inp.focus();
+  } else {
+    const inp=document.getElementById("loginUser"), pw=document.getElementById("loginPw"), btn=document.getElementById("loginBtn");
+    if(inp) inp.oninput=()=>loginForm.username=inp.value;
+    if(pw) pw.oninput=()=>loginForm.password=pw.value;
+    const submit=()=>attemptLogin();
+    if(btn) btn.onclick=submit;
+    [inp,pw].forEach(el=>{ if(el) el.onkeydown=(e)=>{ if(e.key==="Enter") submit(); }; });
+    if(inp && !inp.value) inp.focus(); else if(pw) pw.focus();
+  }
+}
+
+/* ---------- EVALUATE ---------- */
+function viewEmpForm(){
+  const e=emp();
+  const empList=employeesForCurrentUnit();
+  const empOptions=`<option value="">— Select employee —</option>`+empList.map(rec=>
+    `<option value="${esc(rec._id)}" ${String(e.employeeId)===String(rec._id)?"selected":""}>${esc(employeeOptionLabel(rec))}</option>`
+  ).join("");
+  const noList=!state.cfg.employees||state.cfg.employees.length===0;
+  // Target/aspired job grade can never be set below the employee's current job grade — a lower grade would be a demotion, not a progression target.
+  const curJGNum=parseJGNumber(e.currentJG);
+  const allowedTargetOptions=curJGNum!=null?TARGET_JG_OPTIONS.filter(n=>n>=curJGNum):TARGET_JG_OPTIONS;
+  const targetOptions=`<option value="">— Select —</option>`+allowedTargetOptions.map(n=>
+    `<option value="JG${n}" ${e.targetJG===("JG"+n)?"selected":""}>JG${n}</option>`
+  ).join("");
+  return `<div class="card" style="padding:16px;margin-bottom:24px">
+    <div class="eyebrow" style="margin-bottom:10px">ASSESSMENT DETAILS · ${esc(state.bu.toUpperCase())}</div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <label class="field" style="flex:1 1 260px;min-width:220px">
+        <div style="font-size:11.5px;color:var(--sub);font-weight:600;margin-bottom:4px">Employee</div>
+        <select class="inp" id="empselect">${empOptions}</select>
+        ${noList?`<div style="font-size:10.5px;color:var(--faint);margin-top:4px">No employee list imported yet — add one under Admin → Employees.</div>`
+          :(e.employeeId?`<div style="font-size:10.5px;color:var(--faint);margin-top:4px">Showing ${esc(e.name)}'s own saved selections, ratings and Competency Gap.</div>`
+          :`<div style="font-size:10.5px;color:var(--faint);margin-top:4px">No employee selected — this is a blank scratch assessment, not saved against anyone.</div>`)}
+      </label>
+      <label class="field" style="flex:1 1 200px;min-width:160px">
+        <div style="font-size:11.5px;color:var(--sub);font-weight:600;margin-bottom:4px">Position</div>
+        <input class="inp" data-emp="position" value="${esc(e.position)}" placeholder="Current position title" disabled />
+      </label>
+      <label class="field" style="flex:1 1 160px;min-width:140px">
+        <div style="font-size:11.5px;color:var(--sub);font-weight:600;margin-bottom:4px">Current job grade</div>
+        <input class="inp" data-emp="currentJG" value="${esc(e.currentJG)}" placeholder="e.g. JG4" disabled />
+      </label>
+      <label class="field" style="flex:1 1 160px;min-width:140px">
+        <div style="font-size:11.5px;color:var(--sub);font-weight:600;margin-bottom:4px">Target / aspired job grade</div>
+        <select class="inp" id="targetjgselect">${targetOptions}</select>
+        ${curJGNum!=null?`<div style="font-size:10.5px;color:var(--faint);margin-top:4px">Job grades below the current grade (JG${curJGNum}) aren't selectable as a target.</div>`:""}
+      </label>
+      <label class="field" style="flex:1 1 200px;min-width:160px">
+        <div style="font-size:11.5px;color:var(--sub);font-weight:600;margin-bottom:4px">Assessed by</div>
+        <input class="inp" data-emp="assessedBy" value="${esc(e.assessedBy)}" placeholder="Assessor name & title" />
+      </label>
+    </div>
+  </div>`;
+}
+function wireEmpForm(afterChange){
+  const es=document.getElementById("empselect");
+  if(es)es.onchange=()=>{ applyEmployeeSelection(es.value); (afterChange||renderView)(); };
+  const ts=document.getElementById("targetjgselect");
+  if(ts)ts.onchange=()=>{ setEmpField("targetJG",ts.value); (afterChange||renderView)(); };
+}
+function subBlock(sec,sub){
+  const key=sec.id+"."+sub.id; const sel=selections()[key]; const ev=evidence()[key]||"";
+  const evColor = sel ? FAM[cIndex(sel)] : "var(--faint)";
+  const choices=sub.choices.map(c=>{
+    const on=sel===c.id, fi=cIndex(c.id);
+    return `<button class="choice" data-pick="${sec.id}|${sub.id}|${c.id}"
+        style="border-color:${on?FAM[fi]:"var(--lineSoft)"};background:${on?"#fff":"var(--card)"}">
+        <span class="badge" style="background:${on?FAM[fi]:"var(--paper)"};color:${on?"#fff":"var(--sub)"}">${on?"✓":c.id.toUpperCase()}</span>
+        <span style="flex:1;font-size:12.7px;line-height:1.45;color:${on?"var(--ink)":"var(--sub)"}">${c.def?esc(c.def):`<i style="color:var(--faint)">Not yet defined for ${esc(state.bu)} — ask your Admin to add wording under Definitions &amp; Weights</i>`}</span>
+      </button>`;
+  }).join("");
+  return `<div id="subblock-${sec.id}-${sub.id}" style="padding:12px 16px;border-top:1px solid var(--lineSoft)">
+    <div style="font-size:13.5px;font-weight:620;margin-bottom:8px">${esc(sub.name)}</div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <div style="flex:1 1 320px;min-width:280px;display:flex;flex-direction:column;gap:6px">${choices}</div>
+      <div style="flex:1 1 220px;min-width:200px">
+        <div class="row" style="gap:6px;margin-bottom:4px">
+          <span class="eyebrow">EVIDENCE</span>
+          <span class="tnum" style="font-size:10px;font-weight:700;color:${evColor};padding:1px 6px;border-radius:5px;background:var(--paper)">for level ${(sel||"—").toUpperCase()}</span>
+        </div>
+        <textarea class="ev" data-ev="${sec.id}|${sub.id}" placeholder="Note the evidence supporting the level selected on the left (A–E)…">${esc(ev)}</textarea>
+      </div>
+    </div>
+  </div>`;
+}
+function viewSections(){
+  return framework().map(sec=>{
+    const total=sec.subs.length;
+    const cnt=sec.subs.filter(s=>selections()[sec.id+"."+s.id]).length;
+    const isOpen=openSecs[sec.id]!==false;
+    return `<div class="card" style="margin-bottom:12px;overflow:hidden">
+      <button class="sec-head" data-sec="${sec.id}">
+        <span style="color:var(--sub)">${isOpen?"▾":"▸"}</span>
+        <span style="font-size:12px;font-weight:700;color:var(--accent);letter-spacing:.04em">${sec.id}</span>
+        <span style="font-size:15.5px;font-weight:620;flex:1">${esc(sec.name)}</span>
+        <span class="tnum" style="font-size:12px;color:${cnt===total?"var(--accent)":"var(--faint)"}">${cnt}/${total}</span>
+      </button>
+      ${isOpen?`<div style="border-top:1px solid var(--lineSoft)">${sec.subs.map(sub=>subBlock(sec,sub)).join("")}</div>`:""}
+    </div>`;
+  }).join("");
+}
+function scorePanel(){
+  const bd=computeBreakdown(); const jg=lookupJG(bd.total);
+  const answered=Object.keys(selections()).filter(k=>selections()[k]).length;
+  const totalSubs=framework().reduce((n,s)=>n+s.subs.length,0);
+  const color = jg ? FAM[famIndex(jg.fam)] : "var(--faint)";
+  const ladder = state.cfg.jg.slice().reverse().map(r=>{
+    const on=jg&&jg.jg===r.jg; const fi=famIndex(r.fam);
+    return `<div class="row" style="gap:8px">
+      <span class="tnum" style="font-size:10.5px;width:30px;color:${on?"var(--ink)":"var(--faint)"};font-weight:${on?700:500}">JG${r.jg}</span>
+      <div style="flex:1;height:${on?12:7}px;border-radius:3px;background:${on?FAM[fi]:"var(--lineSoft)"}"></div>
+      ${on?`<span style="font-size:10.5px;color:var(--sub);font-weight:600">${esc(famName(r.fam))}</span>`:""}
+    </div>`;
+  }).join("");
+  const empJG=emp().currentJG;
+  return `<div class="card" style="overflow:hidden">
+    <div style="padding:16px;background:var(--paper);border-top:1px solid var(--lineSoft)">
+      <div class="eyebrow">ASSESSED GRADE</div>
+      <div style="margin-top:8px">
+        ${jg?`<div class="row" style="gap:10px">
+          <span class="tnum" style="font-size:20px;font-weight:700;color:#fff;background:${color};border-radius:9px;padding:6px 12px">JG${jg.jg}</span>
+          <span style="font-size:14.5px;color:var(--ink);font-weight:600">${esc(famName(jg.fam))}</span></div>`
+          :`<div style="font-size:12.5px;color:var(--faint)">${answered===0?"Select levels to determine the grade.":"Selections fall outside the defined grade bands."}</div>`}
+        ${(empJG&&jg)?`<div style="font-size:11.5px;color:var(--sub);margin-top:8px">Current ${esc(empJG)} → assessed <b>JG${jg.jg}</b></div>`:""}
+      </div>
+    </div>
+    <div style="padding:12px 16px">
+      <div class="eyebrow" style="margin-bottom:8px">GRADE LADDER</div>
+      <div style="display:flex;flex-direction:column;gap:2px">${ladder}</div>
+    </div>
+    ${jg?roleExpBlock(jg.jg):""}
+  </div>`;
+}
+function roleExpBlock(jgNum){
+  const txt=getRoleExp(state.bu,jgNum);
+  return `<div style="padding:12px 16px;border-top:1px solid var(--lineSoft)">
+    <div class="eyebrow" style="margin-bottom:6px">ROLE EXPECTATIONS · JG${jgNum} · ${esc(state.bu.toUpperCase())}</div>
+    ${txt?`<div style="font-size:12.5px;line-height:1.5;color:var(--ink);white-space:pre-wrap">${esc(txt)}</div>`
+      :`<div style="font-size:12px;color:var(--faint);font-style:italic">Not yet defined for this unit. Add it under Admin → Role Expectations.</div>`}
+  </div>`;
+}
+function confirmBar(){
+  const answered=Object.keys(selections()).filter(k=>selections()[k]).length;
+  const totalSubs=framework().reduce((n,s)=>n+s.subs.length,0);
+  const complete=answered===totalSubs;
+  return `<div class="row between" style="margin-top:20px;gap:12px;flex-wrap:wrap">
+    <div style="font-size:12.5px;color:var(--faint)">${complete?"All sub-sections have a level selected.":(totalSubs-answered)+" sub-section(s) still need a level."}</div>
+    <button id="confirmbtn" class="btn btn-primary" ${complete?"":"disabled"} style="display:flex;align-items:center;gap:8px;padding:10px 20px;font-size:14px;${complete?"":"opacity:.45;cursor:not-allowed"}">✓ Confirm &amp; view report</button>
+  </div>`;
+}
+function viewEvaluate(){
+  return viewEmpForm()+`<div class="flexwrap">
+    <div style="flex:1 1 560px;min-width:320px">
+      <div class="between" style="margin-bottom:16px">
+        <div><div class="h1">Evaluate the position</div>
+          <div style="font-size:13px" class="muted">Select a level for each sub-section and add evidence</div></div>
+        <button id="resetbtn" class="btn btn-ghost" style="display:flex;align-items:center;gap:6px;padding:6px 12px;font-size:12.5px">↺ Clear all selections</button>
+      </div>
+      <div id="sections">${viewSections()}</div>
+      <div id="confirm">${confirmBar()}</div>
+    </div>
+    <aside style="flex:0 0 320px;position:sticky;top:16px"><div id="scorepanel">${scorePanel()}</div></aside>
+  </div>`;
+}
+function refreshSectionsAndPanel(){
+  document.getElementById("sections").innerHTML=viewSections();
+  document.getElementById("scorepanel").innerHTML=scorePanel();
+  document.getElementById("confirm").innerHTML=confirmBar();
+  wireSections(); wireConfirm();
+}
+function wireSections(){
+  document.querySelectorAll("#sections [data-sec]").forEach(b=>b.onclick=()=>{
+    const id=b.dataset.sec; openSecs[id]=openSecs[id]===false?true:false; refreshSectionsAndPanel();
+  });
+  document.querySelectorAll("#sections [data-pick]").forEach(b=>b.onclick=()=>{
+    const [sec,sub,ch]=b.dataset.pick.split("|"); pick(sec,sub,ch); refreshSectionsAndPanel();
+  });
+  document.querySelectorAll("#sections [data-ev]").forEach(t=>t.oninput=()=>{
+    const [sec,sub]=t.dataset.ev.split("|"); setEvidence(sec,sub,t.value);
+  });
+}
+function wireConfirm(){ const b=document.getElementById("confirmbtn"); if(b)b.onclick=()=>{
+  const totalSubs=framework().reduce((n,s)=>n+s.subs.length,0);
+  const answered=Object.keys(selections()).filter(k=>selections()[k]).length;
+  if(answered<totalSubs) return;
+  state.tab="report"; renderTabs(); renderView();
+}; }
+function wireEvaluate(){
+  wireEmpForm();
+  document.querySelectorAll("#view [data-emp]:not([disabled])").forEach(inp=>inp.oninput=()=>{
+    setEmpField(inp.dataset.emp,inp.value);
+    document.getElementById("scorepanel").innerHTML=scorePanel();
+  });
+  const r=document.getElementById("resetbtn"); if(r)r.onclick=()=>{ resetLevels(); refreshSectionsAndPanel(); };
+  wireSections(); wireConfirm();
+}
+
+/* ---------- DEVELOPMENT (Competency Gap + GWC) ---------- */
+const GWC_OPTS=[["plus","+"],["pm","+/-"],["minus","−"]];
+function gwcMarkColor(id){ return id==="plus"?"var(--gwcGreen)":id==="pm"?"var(--gwcOrange)":id==="minus"?"var(--gwcRed)":"var(--faint)"; }
+// Backward-compat: older saved sessions may still hold "yes"/"no" — normalize to the +/+/-/- scale.
+function normGwcVal(v){ return v==="yes"?"plus":v==="no"?"minus":v; }
+function gwcStatus(vals){
+  const n=vals.map(normGwcVal);
+  if(n.some(v=>!v)) return {label:"Incomplete",color:"var(--faint)",id:""};
+  if(n.some(v=>v==="minus")) return {label:"Red",color:"var(--gwcRed)",id:"minus"};
+  if(n.some(v=>v==="pm")) return {label:"Orange",color:"var(--gwcOrange)",id:"pm"};
+  return {label:"Green",color:"var(--gwcGreen)",id:"plus"};
+}
+function gwcMark(color,size,title){ return `<span title="${title?esc(title):""}" style="display:inline-block;width:${size||14}px;height:${size||14}px;border-radius:50%;background:${color};border:1px solid rgba(0,0,0,.12);vertical-align:middle"></span>`; }
+function gwcCard(){
+  const g=competency().gwc;
+  function row(field,label,desc){
+    const val=normGwcVal(g[field]);
+    return `<div style="padding:10px 0;border-top:1px solid var(--lineSoft)">
+      <div style="font-size:13px;font-weight:650;margin-bottom:2px">${label}</div>
+      <div style="font-size:11.5px;color:var(--sub);margin-bottom:8px;line-height:1.4">${desc}</div>
+      <div class="row" style="gap:6px">${GWC_OPTS.map(([id,lbl])=>{
+        const on=val===id; const color=gwcMarkColor(id);
+        return `<button class="btn" data-gwc="${field}|${id}" style="padding:6px 16px;font-size:13px;border-radius:7px;border:1px solid ${on?color:"var(--line)"};background:${on?color:"var(--card)"};color:${on?"#fff":"var(--sub)"};font-weight:${on?700:500}">${lbl}</button>`;
+      }).join("")}</div>
+    </div>`;
+  }
+  const vals=[g.get,g.want,g.capacity];
+  const status=gwcStatus(vals);
+  return `<div class="card" style="padding:16px;margin-bottom:16px">
+    <div class="eyebrow" style="margin-bottom:2px">GWC · RIGHT PERSON, RIGHT SEAT</div>
+    <div style="font-size:12.5px;color:var(--sub);line-height:1.5;margin-bottom:4px">From the Entrepreneurial Operating System (EOS) — rate each as + (yes), +/- (partial) or − (no).</div>
+    ${row("get","Get It","Understands the role, its priorities, and how it fits the bigger picture — the culture, systems and standards behind it.")}
+    ${row("want","Want It","Genuinely wants this role — wants it enough to earn it, not just fill it.")}
+    ${row("capacity","Capacity to do it","Has the time, knowledge, skill, and mental / emotional bandwidth to do the role well, now or with reasonable ramp-up.")}
+    <div class="row" style="margin-top:14px;padding:10px 12px;border-radius:8px;background:var(--paper);gap:10px">
+      <span class="eyebrow" style="margin:0">GWC STATUS</span>${gwcMark(status.color,18,status.label)}
+    </div>
+    <div style="margin-top:12px">
+      <div class="eyebrow" style="margin-bottom:6px">NOTES</div>
+      <textarea class="ev" data-gwcnotes style="min-height:70px" placeholder="Observations behind the GWC call…">${esc(g.notes)}</textarea>
+    </div>
+  </div>`;
+}
+const RATING_LETTERS=["A","B","C","D","E"]; // 1→A … 5→E, per the Proficiency Rating equivalence
+// Proficiency Rating is no longer entered by hand here — it is read straight off whatever
+// choice (A–E) was picked for the matching competency in the Evaluate form, via each
+// COMP_ITEM's sec/sub reference (e.g. "solve" -> B.solve = Problem Solving & Decision Making).
+// A=1, B=2, C=3, D=4, E=5.
+function actualFromEval(item){
+  const key=item.sec+"."+item.sub;
+  const ch=selections()[key];
+  if(!ch) return null;
+  const idx=cIndex(ch);
+  return idx>=0?idx+1:null;
+}
+// Renders the Development Plan cell for one competency row, anchored to that row's Gap Evaluation result.
+// famId (a job family id from state.cfg.families) scopes the training list to the job family tied to the
+// employee's Job Progression Standard level — programs uploaded under "All Families" always show too.
+function devPlanCell(item,gap,famId){
+  ensureDevPlanShape();
+  const kind=gapDevKind(gap);
+  if(kind==="form"){
+    const cp=state.cfg.devPlan.conversationalPlanner;
+    return cp
+      ? `<a href="${cp.dataUrl}" download="${esc(cp.name||"conversational-planner")}" class="btn btn-primary" style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;font-size:11px;text-decoration:none">⭳ Conversational Planner</a>`
+      : `<span style="font-size:11px;color:var(--faint);font-style:italic">Admin has not uploaded the Conversational Planner form yet</span>`;
+  }
+  if(kind==="training"){
+    const byFam=state.cfg.devPlan.trainingPrograms[item.key]||{};
+    const general=byFam._all||[];
+    const specific=(famId&&byFam[famId])?byFam[famId]:[];
+    const list=[...new Set([...specific,...general])];
+    if(!list.length) return `<span style="font-size:11px;color:var(--faint);font-style:italic">Admin has not uploaded a training list for this competency${famId?` (${esc(famName(famId))})`:""}</span>`;
+    return `<ul style="margin:0;padding-left:16px;font-size:11px;line-height:1.5">${list.map(t=>`<li>${esc(t)}</li>`).join("")}</ul>`;
+  }
+  return `<span style="font-size:11px;color:var(--faint)">—</span>`;
+}
+// Shared column widths for the 9-column Competency Gap Analysis table (used on both the Development
+// tab and the printable Report), sized to sum to 100% so the whole table fits without horizontal scroll.
+function gapTableColgroup(){
+  return `<colgroup>
+    <col style="width:15%"/><col style="width:14%"/><col style="width:9%"/><col style="width:8%"/>
+    <col style="width:10%"/><col style="width:8%"/><col style="width:8%"/><col style="width:14%"/><col style="width:14%"/>
+  </colgroup>`;
+}
+function competencyGapCard(){
+  const {jgNum}=resolveAssessJG();
+  const std= jgNum!=null?standardForTargetJG(jgNum):null;
+  const jgRow= jgNum!=null?state.cfg.jg.find(r=>r.jg===jgNum):null;
+  const famId= jgRow?jgRow.fam:null;
+  const rows=COMP_ITEMS.map(item=>{
+    const it=itemState(item.key);
+    const impInfo=effectiveImportance(item.key); const a=impInfo.value;
+    const b = std;
+    const autoD=actualFromEval(item);
+    const d = autoD!=null?autoD:0;
+    const c=(a&&b)?a*b:null; const e2=a?a*d:null;
+    const gap=(c!=null&&e2!=null)?(e2-c):null;
+    const highlight = gap!=null && a>0 && gap>a;
+    let action="—", actionColor="var(--faint)";
+    if(gap!=null){ if(gap>=0){ action="Meets / exceeds standard"; actionColor="var(--accent)"; } else { action=DEV_ACTIONS[gapBucket(Math.abs(gap))][a-1]||"—"; actionColor="var(--warn)"; } }
+    const impBtns = impInfo.locked
+      ? `<div class="tnum" style="font-weight:700;color:var(--accent)">${["Low","Med","High"][a-1]||"—"}</div><div style="font-size:9px;color:var(--faint);margin-top:2px">🔒 locked by admin</div>`
+      : [1,2,3].map(n=>{ const on=a===n; const lbl=["Low","Med","High"][n-1];
+      return `<button class="btn cellbtn ${on?"":"off"}" data-imp="${item.key}|${n}" style="padding:4px 6px;font-size:10.5px;border-radius:6px;border:1px solid ${on?"var(--accent)":"var(--line)"};background:${on?"var(--accent)":"var(--card)"};color:${on?"#fff":"var(--sub)"};font-weight:${on?700:500}">${lbl}</button>`; }).join("");
+    const stdCell=`<div class="tnum" style="font-weight:700">${b??"—"}</div><div style="font-size:9.5px;color:var(--faint);margin-top:3px">🔒 target JG${jgNum??"—"}</div>`;
+    const actLetter = autoD!=null?RATING_LETTERS[autoD-1]:null;
+    const actCell = autoD!=null
+      ? `<div class="tnum" style="font-weight:700;color:var(--accent)">${actLetter} · ${autoD}</div><div style="font-size:9.5px;color:var(--faint);margin-top:2px">from Evaluate</div>`
+      : `<div style="font-size:11px;color:var(--faint);font-style:italic">Not yet rated</div><div style="font-size:9.5px;color:var(--faint);margin-top:1px">in Evaluate tab</div>`;
+    const suggCell = highlight
+      ? `<textarea class="ev" data-remark="${item.key}" style="min-height:44px;font-size:11.5px;width:100%" placeholder="Importance is lower than the gap — add a remark…">${esc(it.remark||"")}</textarea>`
+      : `<span style="font-size:11.5px;color:${actionColor};font-weight:600">${esc(action)}</span>`;
+    return `<tr style="border-top:1px solid var(--lineSoft);${highlight?"background:var(--accentSoft)":""}">
+      <td style="font-weight:600">${esc(item.label)}</td>
+      <td style="text-align:center">${impInfo.locked?impBtns:`<div class="row" style="gap:3px;justify-content:center;flex-wrap:wrap">${impBtns}</div>`}</td>
+      <td style="text-align:center">${stdCell}</td>
+      <td class="tnum" style="text-align:center">${c??"—"}</td>
+      <td style="text-align:center">${actCell}</td>
+      <td class="tnum" style="text-align:center">${e2??"—"}</td>
+      <td class="tnum" style="text-align:center;font-weight:700;color:${highlight?"var(--accent)":(gap!=null?(gap<0?"var(--warn)":"var(--accent)"):"var(--faint)")}">${gap??"—"}</td>
+      <td>${suggCell}</td>
+      <td>${devPlanCell(item,gap,famId)}</td>
+    </tr>`;
+  }).join("");
+  return `<div class="card" style="padding:16px;margin-bottom:16px;overflow:hidden">
+    <div class="between" style="margin-bottom:2px">
+      <div class="eyebrow">COMPETENCY GAP ANALYSIS</div>
+      <button class="btn btn-ghost" id="resetcompbtn" style="display:flex;align-items:center;gap:6px;padding:5px 11px;font-size:11.5px">↺ Reset all ratings</button>
+    </div>
+    <div style="margin-top:12px">
+    <table class="gap-table">${gapTableColgroup()}
+      <thead><tr style="background:var(--paper)">
+        <th>Competency</th><th style="text-align:center">Importance Rating</th><th style="text-align:center">Job Progression Standard 🔒</th><th style="text-align:center">Proficiency Standard</th>
+        <th style="text-align:center">Actual Evaluation Rating</th><th style="text-align:center">Competency Rating</th><th style="text-align:center">Gap Evaluation</th><th>Opportunity Plan</th><th>Development Plan</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    </div>
+    <div style="font-size:11px;color:var(--faint);margin-top:10px;line-height:1.5">Gap is bucketed by size (1–3 / 4–6 / &gt;7) and crossed with the competency's Importance to suggest an action — Reminders through Coaching for Low importance, up to Pull-out for Extensive Training / Job Transfer for High-importance, large gaps.</div>
+    <div style="font-size:11px;color:var(--faint);margin-top:4px;line-height:1.5">${gwcMark("var(--accent)",9)} Highlighted green when the Importance Rating is lower than the Gap Evaluation — the Opportunity Plan column opens up for the evaluator to type their own remarks.</div>
+    <div style="font-size:11px;color:var(--faint);margin-top:4px;line-height:1.5">Actual Evaluation Rating is pulled automatically from this employee's selected choice (A–E) on the matching competency in the Evaluate tab — A=1, B=2, C=3, D=4, E=5. Pick or change a choice there to update it here.</div>
+    <div style="font-size:11px;color:var(--faint);margin-top:4px;line-height:1.5">Job Progression Standard is locked to the employee's target/aspired Job Grade: JG1–JG3 = 1, JG4–JG6 = 2, JG7–JG9 = 3, JG10–JG12 = 4, JG13–JG17 = 5. Change it under the Evaluate tab's "Target / aspired job grade" field.</div>
+    <div style="font-size:11px;color:var(--faint);margin-top:4px;line-height:1.5">Importance Rating shows 🔒 when an admin has locked it for this unit and job grade family under Admin → Competency Importance (based on the employee's target/current Job Grade); otherwise it's set per employee here.</div>
+    <div style="font-size:11px;color:var(--faint);margin-top:4px;line-height:1.5">Development Plan is anchored to the Gap Evaluation result: a gap of −1 to −4 surfaces the admin-uploaded Conversational Planner form to download; a gap of −5 or beyond surfaces the admin-uploaded training program list for that competency, filtered to the job family tied to this employee's Job Progression Standard level${famId?` (currently <b>${esc(famName(famId))}</b>)`:""} — plus any programs uploaded for "All Families". Manage both under Admin → Development Plan.</div>
+  </div>`;
+}
+// Builds the raw gap data (current level vs target/aspired level, per competency) used by the
+// Development Plan "Generate summary" button — same math as the Competency Gap Analysis table,
+// kept separate so it can be composed into prose without touching the table's rendering.
+function buildDevPlanAnalysis(){
+  const e=emp();
+  const {jgNum}=resolveAssessJG();
+  const std= jgNum!=null?standardForTargetJG(jgNum):null;
+  const jgRow= jgNum!=null?state.cfg.jg.find(r=>r.jg===jgNum):null;
+  const famId= jgRow?jgRow.fam:null;
+  const items=COMP_ITEMS.map(item=>{
+    const impInfo=effectiveImportance(item.key); const a=impInfo.value;
+    const b=std;
+    const autoD=actualFromEval(item);
+    const rated=autoD!=null;
+    const d=rated?autoD:0;
+    const c=(a&&b)?a*b:null; const e2=a?a*d:null;
+    const gap=(c!=null&&e2!=null)?(e2-c):null;
+    const action = (gap!=null&&gap<0) ? (DEV_ACTIONS[gapBucket(Math.abs(gap))][a-1]||null) : null;
+    return {label:item.label,importance:a,rated,gap,action};
+  });
+  return {emp:e,jgNum,famId,items};
+}
+// Turns buildDevPlanAnalysis() into a plain-language summary: current vs target/aspired level, which
+// competencies need to close a gap, and the next-step HR intervention drawn straight from the same
+// Reminders → Coaching → Re-training → Pull-out/Transfer plan used in the Competency Gap Analysis table.
+function renderDevPlanSummaryText(){
+  const {emp:e,famId,items}=buildDevPlanAnalysis();
+  const curLbl=e.currentJG||"the current level",tgtLbl=e.targetJG||"the target/aspired level";
+  const famLbl=famId?famName(famId):null;
+  const rated=items.filter(i=>i.rated);
+  if(!rated.length){
+    return "No competencies have been rated yet in the Evaluate tab, so a gap-based summary can't be generated. Complete the Evaluate tab (and set Importance ratings above) first, then generate the summary again.";
+  }
+  const withImportance=rated.filter(i=>i.importance>0);
+  if(!withImportance.length){
+    return "Importance Ratings haven't been set for any competency yet, so a Gap Evaluation can't be computed. Set Importance (Low/Med/High) for the rated competencies above, then generate the summary again.";
+  }
+  // Rank by gap first (most negative = worst), then by Importance as a tiebreaker (High before Med before Low)
+  // — several competencies can legitimately land on the exact same gap, so ties have to be called out
+  // explicitly rather than silently naming whichever one happens to sort first.
+  const needsImprovement=withImportance.filter(i=>i.gap!=null&&i.gap<0).sort((x,y)=>(x.gap-y.gap)||(y.importance-x.importance));
+  const meeting=withImportance.filter(i=>i.gap!=null&&i.gap>=0);
+  const lines=[];
+  lines.push(`Current level: ${curLbl}${e.position?` (${e.position})`:""}. Target/aspired level: ${tgtLbl}${famLbl?` — ${famLbl} job family`:""}.`);
+  if(!needsImprovement.length){
+    lines.push(`Across the rated competencies, the employee currently meets or exceeds the Proficiency Standard expected at ${tgtLbl}. No priority HR intervention is indicated at this time — continue periodic monitoring and stretch assignments to sustain readiness for the target/aspired level.`);
+  } else {
+    lines.push(`To close the gap between the current level and ${tgtLbl}, the following competencies fall below the standard expected there, ranked from the largest gap:`);
+    needsImprovement.forEach(i=>{
+      const impLabel=["","Low","Med","High"][i.importance]||"Unrated";
+      lines.push(`- ${i.label}: gap of ${i.gap} (Importance: ${impLabel}). HR intervention plan: ${i.action||"review with immediate supervisor"}.`);
+    });
+    const worstGap=needsImprovement[0].gap;
+    const tiedWorst=needsImprovement.filter(i=>i.gap===worstGap);
+    if(tiedWorst.length===1){
+      const top=tiedWorst[0];
+      lines.push(`Next step: prioritize "${top.label}" first given the largest gap (${top.gap}) — formalize the "${top.action}" intervention with the employee's immediate supervisor, set a review/coaching schedule, and re-assess progress before advancing further toward ${tgtLbl}.`);
+    } else {
+      const maxImportance=Math.max(...tiedWorst.map(i=>i.importance));
+      const highestPriority=tiedWorst.filter(i=>i.importance===maxImportance);
+      const names=list=>list.map(i=>`"${i.label}"`).join(list.length>1?" and ":"");
+      if(highestPriority.length<tiedWorst.length){
+        lines.push(`Next step: ${tiedWorst.length} competencies are tied for the largest gap (${worstGap}) — ${tiedWorst.map(i=>i.label).join(", ")}. Among these, prioritize ${names(highestPriority)} first for having the higher Importance Rating — formalize the "${highestPriority[0].action}" intervention with the employee's immediate supervisor, set a review/coaching schedule, then work through the remaining tied competencies before advancing further toward ${tgtLbl}.`);
+      } else {
+        lines.push(`Next step: ${tiedWorst.length} competencies are tied for the largest gap (${worstGap}) with the same Importance Rating — ${tiedWorst.map(i=>i.label).join(", ")}. None of them outranks the others on gap size or importance alone, so address them together (or in whatever order best fits the employee's workload), formalizing the "${highestPriority[0].action}" intervention for each with the immediate supervisor and setting a review schedule before advancing further toward ${tgtLbl}.`);
+      }
+    }
+    if(meeting.length) lines.push(`Already meeting or exceeding standard: ${meeting.map(i=>i.label).join(", ")} — sustain through continued exposure and periodic check-ins.`);
+  }
+  return lines.join("\n\n");
+}
+function devPlanCard(){
+  const c=competency();
+  return `<div class="card" style="padding:16px;margin-bottom:16px">
+    <div class="between" style="margin-bottom:8px">
+      <div class="eyebrow">DEVELOPMENT PLAN — COMPETENCE THAT NEEDS IMPROVEMENT</div>
+      <button id="gendevsummary" class="btn btn-ghost" style="display:flex;align-items:center;gap:6px;padding:5px 11px;font-size:11.5px">✨ Generate summary from gap analysis</button>
+    </div>
+    <div style="font-size:11px;color:var(--faint);margin-bottom:8px;line-height:1.4">Generates a draft summary from the Competency Gap Analysis above — current vs. target/aspired level, which competencies need to close a gap, and the next-step HR intervention. Review and edit before saving.</div>
+    <textarea class="ev" data-devnotes style="min-height:100px" placeholder="Specify which competencies need improvement and the plan to close the gap…">${esc(c.devNotes)}</textarea>
+  </div>`;
+}
+function viewDevelopment(){
+  return viewEmpForm()+`<div class="between" style="margin-bottom:16px">
+    <div><div class="h1">Individual development assessment</div>
+      <div style="font-size:13px" class="muted">GWC (EOS) fit + Competency Profile &amp; Measurement Standard gap analysis</div></div>
+  </div>`+gwcCard()+competencyGapCard()+devPlanCard();
+}
+function wireDevelopment(){
+  wireEmpForm(refreshDevelopment);
+  const rcb=document.getElementById("resetcompbtn"); if(rcb)rcb.onclick=()=>{ if(confirm("Reset Importance ratings and remarks for every competency in the Gap Analysis? This can't be undone.")){ resetAllCompetencyItems(); refreshDevelopment(); } };
+  document.querySelectorAll("#view [data-emp]:not([disabled])").forEach(inp=>inp.oninput=()=>{ setEmpField(inp.dataset.emp,inp.value); refreshDevelopment(); });
+  document.querySelectorAll("#view [data-gwc]").forEach(b=>b.onclick=()=>{ const [f,v]=b.dataset.gwc.split("|"); setGwc(f,v); refreshDevelopment(); });
+  const gn=document.querySelector("#view [data-gwcnotes]"); if(gn)gn.oninput=()=>setGwcNotes(gn.value);
+  document.querySelectorAll("#view [data-imp]").forEach(b=>b.onclick=()=>{ const [k,n]=b.dataset.imp.split("|"); setItemField(k,"importance",Number(n)); refreshDevelopment(); });
+  document.querySelectorAll("#view [data-remark]").forEach(t=>t.oninput=()=>setItemField(t.dataset.remark,"remark",t.value));
+  const dn=document.querySelector("#view [data-devnotes]"); if(dn)dn.oninput=()=>setDevNotes(dn.value);
+  const gs=document.getElementById("gendevsummary"); if(gs)gs.onclick=()=>{
+    const cur=(competency().devNotes||"").trim();
+    if(cur && !confirm("Replace the current Development Plan notes with a generated summary based on the Competency Gap Analysis above? You can still edit it afterward.")) return;
+    setDevNotes(renderDevPlanSummaryText());
+    refreshDevelopment();
+  };
+}
+function refreshDevelopment(){ const v=document.getElementById("view"); v.innerHTML=viewDevelopment(); wireDevelopment(); }
+
+/* ---------- REPORT ---------- */
+function summaryCard(label,value,mono,accent,sub){
+  return `<div style="background:var(--paper);border:1px solid var(--lineSoft);border-radius:10px;padding:12px 16px;min-width:120px">
+    <div class="eyebrow">${esc(label.toUpperCase())}</div>
+    <div class="${mono?"tnum":""}" style="font-size:18px;font-weight:650;margin-top:2px;color:${accent||"var(--ink)"}">${esc(value)}</div>
+    ${sub?`<div style="font-size:11.5px;font-weight:600;color:var(--sub);margin-top:2px">${esc(sub)}</div>`:""}</div>`;
+}
+function field(label,value,wide){
+  return `<div style="flex:${wide?"1 1 260px":"0 0 auto"};min-width:150px">
+    <div class="eyebrow">${esc(label.toUpperCase())}</div>
+    <div style="font-size:14px;font-weight:600;margin-top:3px;color:${value?"var(--ink)":"var(--faint)"};border-bottom:1px solid var(--lineSoft);padding-bottom:4px;min-height:22px">${esc(value||"—")}</div></div>`;
+}
+function signature(label,hint){
+  return `<div style="flex:1 1 200px;min-width:180px">
+    <div class="sig"></div>
+    <div style="font-size:11.5px;font-weight:700;color:var(--sub);margin-top:5px">${esc(label)}</div>
+    <div style="font-size:11px;color:var(--faint)">${hint?esc(hint):"Name · Signature · Date"}</div></div>`;
+}
+function viewReport(){
+  const bd=computeBreakdown(); const jg=lookupJG(bd.total); const e=emp();
+  const color=jg?FAM[famIndex(jg.fam)]:"var(--ink)";
+  const today=new Date().toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"});
+  const rows=bd.rows.map((r,i)=>{
+    const showSec=i===0||bd.rows[i-1].sec.id!==r.sec.id;
+    const key=r.sec.id+"."+r.sub.id; const ev=evidence()[key];
+    return `<tr style="border-top:1px solid var(--lineSoft)">
+      <td>${showSec?`<span style="font-size:11px;font-weight:700;color:var(--accent)">${r.sec.id} · ${esc(r.sec.name)}</span>`:""}</td>
+      <td><span style="font-weight:600">${esc(r.sub.name)}</span></td>
+      <td style="text-align:center">${r.ch?`<span class="tnum" style="font-weight:700;color:${FAM[r.famIdx]}">${r.ch.id.toUpperCase()}</span>`:'<span class="muted">—</span>'}</td>
+      <td>${r.ch?`<span style="color:var(--sub);line-height:1.4">${esc(r.ch.def)}</span>${ev?`<span style="display:block;margin-top:4px;font-size:11.5px;color:var(--ink);border-left:2px solid ${FAM[r.famIdx]};padding-left:7px;line-height:1.4"><b style="color:var(--faint);font-weight:700">Evidence: </b>${esc(ev)}</span>`:""}`:'<span style="color:var(--faint);font-style:italic">Not selected</span>'}</td>
+      <td style="text-align:center" class="tnum">${r.ch?(Math.round(r.weight*100)/100):"—"}</td>
+      <td class="tnum" style="text-align:center;color:var(--sub)">${r.ch?r.mult:"—"}</td>
+      <td class="tnum" style="text-align:center;font-weight:600">${r.ch?Math.round(r.score).toLocaleString():"—"}</td>
+    </tr>`;
+  }).join("");
+  return `<div class="between no-print" style="margin-bottom:20px">
+      <div><div class="h1">Assessment report</div><div style="font-size:13px" class="muted">Printable breakdown — every level and its evidence</div></div>
+      <button id="printbtn" class="btn btn-primary no-print" style="display:flex;align-items:center;gap:6px;padding:8px 14px;font-size:13px">🖨 Print / PDF</button>
+    </div>
+    <div class="card print-card" style="padding:24px">
+      <div class="between" style="border-bottom:2px solid var(--ink);padding-bottom:14px;margin-bottom:20px">
+        <div><div style="font-size:18px;font-weight:700;letter-spacing:-.01em">Result</div>
+          <div style="font-size:12.5px" class="muted">${esc(state.bu)} · ${today}</div></div>
+        <div style="text-align:right"><div class="eyebrow">RESULT</div>
+          <div class="tnum" style="font-size:15px;font-weight:700;color:${color}">${jg?`JG${jg.jg} · ${esc(famName(jg.fam))}`:"—"}</div></div>
+      </div>
+      <div style="display:flex;gap:32px 32px;flex-wrap:wrap;margin-bottom:24px">
+        ${field("Employee name",e.name,true)}${field("Position",e.position)}${field("Current job grade",e.currentJG)}${field("Target / Aspired job grade",e.targetJG)}${field("Assessed by",e.assessedBy,true)}
+      </div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:24px">
+        ${summaryCard("Total score",bd.total.toLocaleString(),true,color,jg?`= JG${jg.jg} · ${famName(jg.fam)}`:"= —")}
+      </div>
+      <div style="overflow-x:auto;border:1px solid var(--lineSoft);border-radius:10px">
+        <table style="min-width:720px">
+          <thead><tr style="background:var(--paper)">
+            <th>Section</th><th>Sub-section</th><th style="text-align:center">Lvl</th>
+            <th>Selected definition</th><th style="text-align:center">Weight</th><th style="text-align:center">×Mult</th><th style="text-align:center">Score</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+          <tfoot><tr style="background:var(--paper);border-top:2px solid var(--line)">
+            <td></td><td><b>Total</b></td><td></td><td></td>
+            <td style="text-align:center" class="tnum"><b>${Math.round(bd.weightSum)}</b></td><td></td>
+            <td style="text-align:center" class="tnum"><b style="color:${color}">${bd.total.toLocaleString()}</b></td>
+          </tr></tfoot>
+        </table>
+      </div>
+      ${jg&&getRoleExp(state.bu,jg.jg)?`<div style="margin-top:24px;background:var(--paper);border:1px solid var(--lineSoft);border-radius:10px;padding:14px 16px">
+        <div class="eyebrow" style="margin-bottom:6px">ROLE EXPECTATIONS · JG${jg.jg} · ${esc(state.bu.toUpperCase())}</div>
+        <div style="font-size:12.5px;line-height:1.55;color:var(--ink);white-space:pre-wrap">${esc(getRoleExp(state.bu,jg.jg))}</div>
+      </div>`:""}
+      <div style="display:flex;gap:40px;flex-wrap:wrap;margin-top:32px">
+        ${signature("Assessed by",e.assessedBy)}${signature("Employee acknowledgement",e.name)}${signature("Approved by")}
+      </div>
+      ${reportDevBlock()}
+    </div>`;
+}
+function reportDevBlock(){
+  const c=competency(); const {jgNum,src}=resolveAssessJG();
+  const std= jgNum!=null?standardForTargetJG(jgNum):null;
+  const jgRow= jgNum!=null?state.cfg.jg.find(r=>r.jg===jgNum):null;
+  const famId= jgRow?jgRow.fam:null;
+  const gwcLabel={plus:"+",pm:"+/-",minus:"−","":"—",yes:"+",no:"−"};
+  const vals=[c.gwc.get,c.gwc.want,c.gwc.capacity];
+  const status=gwcStatus(vals);
+  const rows=COMP_ITEMS.map(item=>{
+    const it=itemState(item.key);
+    const impInfo=effectiveImportance(item.key); const a=impInfo.value;
+    const b = std;
+    const autoD=actualFromEval(item);
+    const d = autoD!=null?autoD:0;
+    const cVal=(a&&b)?a*b:null; const eVal=a?a*d:null;
+    const gap=(cVal!=null&&eVal!=null)?(eVal-cVal):null;
+    const highlight = gap!=null && a>0 && gap>a;
+    let action="—";
+    if(gap!=null){ action = gap>=0 ? "Meets / exceeds standard" : (DEV_ACTIONS[gapBucket(Math.abs(gap))][a-1]||"—"); }
+    const actionCell = highlight
+      ? (it.remark?esc(it.remark):`<span style="color:var(--faint);font-style:italic">No remarks added</span>`)
+      : esc(action);
+    return `<tr style="border-top:1px solid var(--lineSoft);${highlight?"background:var(--accentSoft)":""}">
+      <td style="font-weight:600">${esc(item.label)}</td>
+      <td class="tnum" style="text-align:center">${a||"—"}</td>
+      <td class="tnum" style="text-align:center">${b??"—"}</td>
+      <td class="tnum" style="text-align:center">${cVal??"—"}</td>
+      <td class="tnum" style="text-align:center">${autoD!=null?`${RATING_LETTERS[autoD-1]} · ${autoD}`:"—"}</td>
+      <td class="tnum" style="text-align:center">${eVal??"—"}</td>
+      <td class="tnum" style="text-align:center;font-weight:700;color:${highlight?"var(--accent)":(gap!=null&&gap<0?"var(--warn)":"var(--ink)")}">${gap??"—"}</td>
+      <td style="font-size:11.5px">${actionCell}</td>
+      <td style="font-size:11.5px">${devPlanCell(item,gap,famId)}</td>
+    </tr>`;
+  }).join("");
+  return `<div style="margin-top:28px;border-top:2px solid var(--ink);padding-top:20px">
+    <div style="font-size:18px;font-weight:700;letter-spacing:-.01em;margin-bottom:2px">Competency Gap &amp; Development Plan</div>
+    <div style="font-size:12.5px" class="muted">GWC (EOS) fit + Competency Profile &amp; Measurement Standard</div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin:16px 0;align-items:stretch">
+      ${summaryCard("Get It",gwcLabel[c.gwc.get]||"—")}${summaryCard("Want It",gwcLabel[c.gwc.want]||"—")}${summaryCard("Capacity",gwcLabel[c.gwc.capacity]||"—")}
+      <div style="background:var(--paper);border:1px solid var(--lineSoft);border-radius:10px;padding:12px 16px;min-width:120px">
+        <div class="eyebrow">GWC STATUS</div>
+        <div style="margin-top:6px">${gwcMark(status.color,20,status.label)}</div>
+      </div>
+    </div>
+    ${c.gwc.notes?`<div style="font-size:12px;color:var(--sub);line-height:1.5;margin-bottom:16px"><b>GWC notes: </b>${esc(c.gwc.notes)}</div>`:""}
+    <div style="font-size:12px;color:var(--sub);margin-bottom:8px">Job Progression Standard (b) calculated at ${jgNum!=null?`JG${jgNum}${jgRow?" · "+esc(famName(jgRow.fam)):""} (${src==="target"?"target grade":"current grade"})`:"—"}</div>
+    <div style="border:1px solid var(--lineSoft);border-radius:10px;margin-bottom:16px;overflow:hidden">
+      <table class="gap-table">${gapTableColgroup()}
+        <thead><tr style="background:var(--paper)"><th>Competency</th><th style="text-align:center">Importance Rating</th><th style="text-align:center">Job Progression Standard</th><th style="text-align:center">Proficiency Standard</th><th style="text-align:center">Actual Evaluation Rating</th><th style="text-align:center">Competency Rating</th><th style="text-align:center">Gap Evaluation</th><th>Opportunity Plan / Remarks</th><th>Development Plan</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div style="font-size:10.5px;color:var(--faint);margin-top:-10px;margin-bottom:16px">${gwcMark("var(--accent)",9)} Rows highlighted green: Importance Rating is lower than the Gap Evaluation — evaluator remarks shown in place of the auto-suggested action.</div>
+    ${c.devNotes?`<div style="margin-bottom:20px"><div class="eyebrow" style="margin-bottom:4px">DEVELOPMENT PLAN — COMPETENCE THAT NEEDS IMPROVEMENT</div><div style="font-size:12.5px;line-height:1.55;white-space:pre-wrap">${esc(c.devNotes)}</div></div>`:""}
+  </div>`;
+}
+
+/* ---------- ADMIN ---------- */
+// "Reset to defaults" is scoped to whichever Admin tab is currently open — resetting one module
+// (say, Grade Bands) must never touch another module's data (Family Multipliers, Business Units,
+// or any of the four tabs below that hold data an admin built up over time rather than a "default").
+// Only tabs that actually have a shipped default to fall back to get a reset button at all; Role
+// Expectations, Competency Importance, Development Plan and Employees are pure admin-entered data
+// with no "default" to revert to, and each already has its own dedicated per-item clear control.
+const RESETTABLE_PANELS={
+  weights:{label:"Definitions & Weights",detail:()=>`the level definitions and section weights for the current unit ("${state.bu}") only — other units keep their own`},
+  mult:{label:"Family Multipliers",detail:()=>"the job family list, factors and base multiplier (this applies across every unit)"},
+  bands:{label:"Grade Bands",detail:()=>"the Job Grade → score band → family table (this applies across every unit)"},
+  units:{label:"Business Units",detail:()=>"the list of business units — this will NOT delete any unit's saved Definitions & Weights, Role Expectations, Competency Importance, or other data"}
+};
+function resetAdminPanelToDefault(panel){
+  const fresh=defaultConfig();
+  if(panel==="weights"){
+    state.cfg.frameworks[state.bu]=cloneFramework();
+  } else if(panel==="mult"){
+    state.cfg.families=fresh.families;
+    state.cfg.base=fresh.base;
+    ensureFamilyProfStandards();
+  } else if(panel==="bands"){
+    state.cfg.jg=fresh.jg;
+    ensureJGShape();
+  } else if(panel==="units"){
+    state.cfg.businessUnits=[...fresh.businessUnits];
+    state.cfg.businessUnits.forEach(u=>{ if(!state.cfg.frameworks[u]) state.cfg.frameworks[u]=cloneFramework(); });
+    ensureRoleExpShape(); ensureImportanceShape();
+    if(!state.cfg.businessUnits.includes(state.bu)){ state.bu=state.cfg.businessUnits[0]; state.currentEmployeeId=""; ensureSession(); }
+  } else { return; }
+  scheduleSave();
+  renderBU(); renderView();
+}
+function viewAdmin(){
+  const panels=[["weights","Definitions & Weights"],["mult","Family Multipliers"],["bands","Grade Bands"],["roleexp","Role Expectations"],["importance","Competency Importance"],["devplan","Development Plan"],["employees","Employees"],["units","Business Units"],["users","Users & Access"]];
+  const tabs=panels.map(([id,lbl])=>`<button class="btn" data-apanel="${id}" style="padding:6px 12px;font-size:12.5px;border-radius:7px;background:${adminPanel===id?"var(--ink)":"var(--card)"};color:${adminPanel===id?"#fff":"var(--sub)"};border:1px solid ${adminPanel===id?"var(--ink)":"var(--line)"}">${lbl}</button>`).join("");
+  let body="";
+  if(adminPanel==="weights") body=adminWeights();
+  else if(adminPanel==="mult") body=adminMult();
+  else if(adminPanel==="bands") body=adminBands();
+  else if(adminPanel==="roleexp") body=adminRoleExpectations();
+  else if(adminPanel==="importance") body=adminImportance();
+  else if(adminPanel==="devplan") body=adminDevPlan();
+  else if(adminPanel==="employees") body=adminEmployees();
+  else if(adminPanel==="units") body=adminUnits();
+  else body=adminUsers();
+  const resetInfo=RESETTABLE_PANELS[adminPanel];
+  const resetBtn=resetInfo?`<button id="resetcfg" class="btn btn-warn" style="display:flex;align-items:center;gap:6px;padding:6px 12px;font-size:12.5px">↺ Reset ${esc(resetInfo.label)} to defaults</button>`:"";
+  return `<div class="between" style="margin-bottom:16px">
+      <div><div class="h1">Admin settings</div><div style="font-size:13px" class="muted">Edits sync automatically and carry over to the next evaluation</div></div>
+      ${resetBtn}
+    </div>
+    <div class="row" style="gap:4px;margin-bottom:20px;flex-wrap:wrap">${tabs}</div>
+    <div id="apanel">${body}</div>`;
+}
+function fwTotal(fw){ let t=0; fw.forEach(sec=>sec.subs.forEach(sub=>t+=Number(sub.weight)||0)); return t; }
+function wtBannerHTML(fw){
+  const total=Math.round(fwTotal(fw)*100)/100;
+  const allOk=Math.abs(fwTotal(fw)-100)<0.5;
+  const totalSubs=fw.reduce((n,sec)=>n+sec.subs.length,0);
+  return {allOk,html:`${allOk?`✓ All ${totalSubs} sub-sections total 100`:(total<100?`${Math.round((100-total)*100)/100} credits remaining to reach 100`:`${Math.round((total-100)*100)/100} credits over 100 — reduce to reach 100`)}`};
+}
+function refreshWtBanner(){
+  const el=document.getElementById("wtbanner"); if(!el)return;
+  const {allOk,html}=wtBannerHTML(framework());
+  el.style.background=allOk?"var(--accentSoft)":"var(--warnSoft)";
+  el.style.borderColor=allOk?"var(--accent)":"var(--line)";
+  el.querySelector("span").style.color=allOk?"var(--accent)":"var(--warn)";
+  el.querySelector("span").style.fontWeight=allOk?"700":"400";
+  el.querySelector("span").textContent=html;
+}
+function adminWeights(){
+  const mults=familyMultipliers();
+  const fw=framework();
+  const {allOk,html:bannerText}=wtBannerHTML(fw);
+  const totalSubs=fw.reduce((n,sec)=>n+sec.subs.length,0);
+  const secs=fw.map(sec=>{
+    const on=adminOpenSec===sec.id;
+    const body=on?`<div style="border-top:1px solid var(--lineSoft)">${sec.subs.map(sub=>`
+      <div style="padding:12px 16px;border-top:1px solid var(--lineSoft)">
+        <div class="row" style="gap:8px;margin-bottom:8px">
+          <span style="font-size:13.5px;font-weight:650;flex:1">${esc(sub.name)}</span>
+          <span style="font-size:10.5px;color:var(--faint)">weight</span>
+          <input type="number" step="0.01" data-wt="${sec.id}|${sub.id}" value="${Math.round((Number(sub.weight)||0)*100)/100}" class="tnum" style="width:70px;font-size:12.5px;padding:5px 6px;text-align:right;border:1px solid var(--line);border-radius:7px"/>
+        </div>
+        ${sub.choices.map(c=>{const fi=cIndex(c.id);return `<div class="row" style="align-items:flex-start;gap:8px;margin-bottom:8px">
+          <span class="tnum" title="×${mults[fi].mult}" style="flex:0 0 auto;width:22px;height:22px;border-radius:5px;font-size:11px;font-weight:700;background:${FAM[fi]};color:#fff;display:flex;align-items:center;justify-content:center;margin-top:4px">${c.id.toUpperCase()}</span>
+          <textarea data-def="${sec.id}|${sub.id}|${c.id}" rows="2" placeholder="Not yet defined for ${esc(state.bu)} — type this level's definition here" style="flex:1;font-size:12.5px;line-height:1.4;padding:6px 8px;border:1px solid var(--line);border-radius:7px;resize:vertical;background:var(--card)">${esc(c.def)}</textarea>
+          <span class="tnum" style="font-size:10px;color:var(--faint);margin-top:8px;flex:0 0 auto">×${mults[fi].mult}</span>
+        </div>`;}).join("")}
+      </div>`).join("")}</div>`:"";
+    return `<div class="card" style="margin-bottom:12px;overflow:hidden">
+      <button class="sec-head" data-asec="${sec.id}">
+        <span style="color:var(--sub)">${on?"▾":"▸"}</span>
+        <span style="font-size:12px;font-weight:700;color:var(--accent)">${sec.id}</span>
+        <span style="font-size:15px;font-weight:620;flex:1">${esc(sec.name)}</span>
+        <span class="tnum" style="font-size:12px;color:var(--faint)">${sec.subs.length} sub-sections</span>
+      </button>${body}</div>`;
+  }).join("");
+  return `<div class="row" style="gap:8px;margin-bottom:12px;background:var(--ink);border-radius:10px;color:#fff;padding:10px 16px">
+      <span>🏢</span><span style="font-size:12.5px">Editing definitions &amp; weights for</span><span style="font-size:13px;font-weight:700">${esc(state.bu)}</span>
+      <span style="font-size:11.5px;color:#B9C6C0;margin-left:auto">Each unit keeps its own set</span></div>
+    <div style="margin-bottom:16px;background:var(--accentSoft);border:1px solid var(--line);border-radius:10px;padding:12px 16px;font-size:12.5px;line-height:1.5">
+      <b>How scoring works.</b> Each sub-section (e.g. Education, Work Experience) has one <b>weight</b> — the individual a–e choices don't carry their own weight. Across all ${totalSubs} sub-sections in the framework, weights sum to <b>100</b>. The level chosen also sets a multiplier — a ×10, b ×20, c ×40, d ×80, e ×160. A selected level scores <b>the sub-section's weight × its multiplier</b>; the totals sum to the score.
+    </div>
+    <div id="wtbanner" style="margin-bottom:16px;background:${allOk?"var(--accentSoft)":"var(--warnSoft)"};border:1px solid ${allOk?"var(--accent)":"var(--line)"};border-radius:10px;padding:12px 16px">
+      <span style="font-size:12.5px;font-weight:${allOk?700:400};color:${allOk?"var(--accent)":"var(--warn)"}">${bannerText}</span>
+    </div>${secs}`;
+}
+function adminMult(){
+  const mults=familyMultipliers();
+  const rows=state.cfg.families.map((f,i)=>`<div class="row" style="gap:12px;margin-bottom:8px;border:1px solid var(--lineSoft);border-radius:8px;padding:8px 12px">
+    <span class="tnum" style="font-size:11px;font-weight:700;color:#fff;background:${FAM[i]};width:20px;height:20px;border-radius:5px;display:flex;align-items:center;justify-content:center">${L[i].toUpperCase()}</span>
+    <input data-fname="${i}" value="${esc(f.name)}" style="flex:1;font-size:13.5px;font-weight:600;padding:5px 7px;border:1px solid var(--line);border-radius:7px"/>
+    <span style="font-size:11.5px;color:var(--faint)">×factor</span>
+    <input type="number" step="0.1" data-ffactor="${i}" value="${f.factor}" class="tnum" style="width:62px;font-size:13px;padding:5px 7px;text-align:right;border:1px solid var(--line);border-radius:7px"/>
+    <span class="tnum" id="mult-eff-${i}" style="font-size:12.5px;color:var(--accent);font-weight:700;width:64px;text-align:right">×${mults[i].mult}</span>
+    <span style="width:1px;height:20px;background:var(--lineSoft)"></span>
+    <span style="font-size:11.5px;color:var(--faint)">Prof. standard</span>
+    <input type="number" min="1" max="5" step="1" data-fprof="${i}" value="${f.profStandard??(i+1)}" class="tnum" style="width:48px;font-size:13px;padding:5px 7px;text-align:right;border:1px solid var(--line);border-radius:7px"/>
+  </div>`).join("");
+  return `<div class="card" style="padding:20px;max-width:660px">
+    <div class="row" style="gap:12px;margin-bottom:20px"><span style="font-size:13.5px;font-weight:650">Base multiplier (level a / Specialist = weight ×)</span>
+      <input type="number" data-base value="${state.cfg.base}" class="tnum" style="width:70px;font-size:13px;padding:6px 8px;text-align:right;border:1px solid var(--line);border-radius:7px"/></div>
+    <div class="eyebrow" style="margin-bottom:8px">FAMILIES — level a→row 1 … level e→row 5. Each factor multiplies the running total.</div>
+    ${rows}
+    <p style="font-size:12px;color:var(--faint);margin-top:10px;line-height:1.5">Effective multiplier = base × running product of factors. Defaults give ×10, ×20, ×40, ×80, ×160 — each family doubles the previous.</p>
+    <p style="font-size:12px;color:var(--faint);margin-top:6px;line-height:1.5"><b>Prof. standard</b> is this family's Proficiency Standard rating (1–5) used as column (b) in the Competency Gap Analysis. Set it however this job family's expected proficiency should be measured — it no longer has to match the family's position in the list.</p>
+  </div>`;
+}
+function adminBands(){
+  const rows=state.cfg.jg.map((r,i)=>`<tr style="border-top:1px solid var(--lineSoft)">
+    <td style="text-align:center"><span class="tnum" style="font-weight:700">${r.jg}</span></td>
+    <td style="text-align:center"><input type="number" data-jgmin="${i}" value="${r.min}" class="tnum" style="width:88px;font-size:12.5px;padding:5px 6px;text-align:right;border:1px solid var(--line);border-radius:6px"/></td>
+    <td style="text-align:center"><input type="number" data-jgmax="${i}" value="${r.max}" class="tnum" style="width:88px;font-size:12.5px;padding:5px 6px;text-align:right;border:1px solid var(--line);border-radius:6px"/></td>
+    <td><select data-jgfam="${i}" style="font-size:12.5px;padding:5px 6px;border:1px solid var(--line);border-radius:6px;width:100%">${state.cfg.families.map(f=>`<option value="${f.id}" ${f.id===r.fam?"selected":""}>${esc(f.name)}</option>`).join("")}</select></td>
+  </tr>`).join("");
+  return `<div class="card" style="overflow:hidden;max-width:640px"><table>
+    <thead><tr style="background:var(--paper)"><th style="text-align:center">JG</th><th style="text-align:center">Min</th><th style="text-align:center">Max</th><th>Family</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+}
+function adminRoleExpectations(){
+  if(!adminRoleExpUnit||!state.cfg.businessUnits.includes(adminRoleExpUnit)) adminRoleExpUnit=state.bu;
+  ensureRoleExpShape();
+  const unitOpts=state.cfg.businessUnits.map(u=>`<option value="${esc(u)}" ${u===adminRoleExpUnit?"selected":""}>${esc(u)}</option>`).join("");
+  const rows=state.cfg.jg.map((r,i)=>{
+    const fi=famIndex(r.fam);
+    const txt=getRoleExp(adminRoleExpUnit,r.jg);
+    return `<div class="card" style="margin-bottom:10px;overflow:hidden">
+      <div class="row" style="gap:10px;padding:10px 14px;background:var(--paper);border-bottom:1px solid var(--lineSoft)">
+        <span class="tnum" style="font-size:12px;font-weight:700;color:#fff;background:${FAM[fi]||"var(--sub)"};border-radius:6px;padding:3px 9px">JG${r.jg}</span>
+        <span style="font-size:12.5px;font-weight:600;color:var(--sub)">${esc(famName(r.fam))}</span>
+        <span class="tnum" style="font-size:11px;color:var(--faint);margin-left:auto">score ${r.min.toLocaleString()}–${r.max.toLocaleString()}</span>
+      </div>
+      <div style="padding:12px 14px">
+        <textarea data-roleexp="${r.jg}" class="ev" style="min-height:80px" placeholder="Describe what's expected of someone in this role once they reach JG${r.jg} in ${esc(adminRoleExpUnit)} — responsibilities, decisions, scope, who they work with…">${esc(txt)}</textarea>
+      </div>
+    </div>`;
+  }).join("");
+  return `<div class="row" style="gap:10px;margin-bottom:16px;background:var(--ink);border-radius:10px;color:#fff;padding:10px 16px;flex-wrap:wrap">
+      <span>🏢</span><span style="font-size:12.5px">Department / unit</span>
+      <select id="roleexpunit" style="font-size:13px;font-weight:700;padding:4px 8px;border-radius:6px;border:1px solid #3a4440;background:#20302a;color:#fff">${unitOpts}</select>
+      <span style="font-size:11.5px;color:#B9C6C0;margin-left:auto">Each unit keeps its own expectations per grade</span></div>
+    <p style="font-size:12.5px;color:var(--sub);line-height:1.5;margin:0 0 12px">Write an open, free-text description of the role expectations for each Job Grade — what the position looks like, and what's expected of the person, once they reach that level within this department. This appears on the Evaluate screen and printable Report for whichever unit and grade an employee is assessed into.</p>
+    <div class="row" style="gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      <button id="expRoleExp" class="btn btn-ghost" style="display:flex;align-items:center;gap:6px;padding:7px 12px;font-size:12.5px">⭳ Export ${esc(adminRoleExpUnit)} (.xlsx)</button>
+      <button id="impRoleExp" class="btn btn-ghost" style="display:flex;align-items:center;gap:6px;padding:7px 12px;font-size:12.5px">⭱ Import into ${esc(adminRoleExpUnit)}</button>
+      <input id="impRoleExpFile" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none"/>
+      <span style="font-size:11.5px;color:var(--faint)">Export a unit's role expectations as an Excel file, then import it into this or another unit.</span>
+    </div>
+    ${rows}`;
+}
+function exportRoleExpectations(){
+  ensureRoleExpShape();
+  if(typeof XLSX==="undefined"){ alert("Excel export isn't available right now — check your connection and try again."); return; }
+  const unit=adminRoleExpUnit;
+  const grades=state.cfg.roleExpectations[unit]||{};
+  const rows=state.cfg.jg.map(r=>({
+    "Job Grade":r.jg,
+    "Family":famName(r.fam),
+    "Score Min":r.min,
+    "Score Max":r.max,
+    "Role Expectations":grades[r.jg]??grades[String(r.jg)]??""
+  }));
+  const ws=XLSX.utils.json_to_sheet(rows);
+  ws["!cols"]=[{wch:10},{wch:22},{wch:11},{wch:11},{wch:90}];
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,"Role Expectations");
+  const metaWs=XLSX.utils.aoa_to_sheet([["Unit",unit],["Exported At",new Date().toISOString()]]);
+  XLSX.utils.book_append_sheet(wb,metaWs,"Meta");
+  XLSX.writeFile(wb,`role-expectations-${unit.replace(/[^a-z0-9]+/gi,"-").toLowerCase()}.xlsx`);
+}
+function importRoleExpectations(file){
+  if(typeof XLSX==="undefined"){ alert("Excel import isn't available right now — check your connection and try again."); return; }
+  const reader=new FileReader();
+  reader.onload=()=>{
+    let wb;
+    try{ wb=XLSX.read(reader.result,{type:"array"}); }catch(e){ alert("Couldn't read that file — make sure it's a Role Expectations .xlsx export."); return; }
+    const sheetName=wb.SheetNames.find(n=>/role/i.test(n))||wb.SheetNames[0];
+    const ws=wb.Sheets[sheetName];
+    if(!ws){ alert("Couldn't read that file — make sure it's a Role Expectations .xlsx export."); return; }
+    const rows=XLSX.utils.sheet_to_json(ws,{defval:""});
+    const grades={};
+    rows.forEach(row=>{
+      const jgKey=Object.keys(row).find(k=>/job\s*grade|^jg$/i.test(k));
+      const descKey=Object.keys(row).find(k=>/role\s*expectations?|description/i.test(k));
+      const jg=jgKey?String(row[jgKey]).trim():"";
+      if(!jg)return;
+      grades[jg]=String((descKey?row[descKey]:"")??"");
+    });
+    if(!Object.keys(grades).length){ alert("That file doesn't contain any grade descriptions."); return; }
+    let fromUnit=null;
+    const metaSheet=wb.Sheets[wb.SheetNames.find(n=>/meta/i.test(n))];
+    if(metaSheet){
+      const meta=XLSX.utils.sheet_to_json(metaSheet,{header:1});
+      const unitRow=meta.find(r=>r&&/unit/i.test(r[0]));
+      if(unitRow)fromUnit=String(unitRow[1]||"").trim()||null;
+    }
+    ensureRoleExpShape();
+    const unit=adminRoleExpUnit;
+    const fromOtherUnit=fromUnit&&fromUnit!==unit;
+    const count=Object.keys(grades).length;
+    if(!confirm(`Import ${count} job-grade description(s)${fromOtherUnit?` from "${fromUnit}"`:""} into "${unit}"? This will overwrite any matching job grades already defined here.`)) return;
+    const existing=state.cfg.roleExpectations[unit]||{};
+    Object.keys(grades).forEach(jg=>{ existing[jg]=String(grades[jg]??""); });
+    state.cfg.roleExpectations[unit]=existing;
+    scheduleSave();
+    renderView();
+  };
+  reader.onerror=()=>alert("Couldn't read that file.");
+  reader.readAsArrayBuffer(file);
+}
+let adminImportanceUnit=null; // which department's competency importance the admin panel is editing
+// Fill matching the example mock: High = blue, Med = yellow, Low = plain/neutral.
+// Low's selected fill used to equal the UNselected style (both plain/grey), so clicking "L" produced
+// no visible change and looked broken/unclickable even though the value was saving correctly. Give
+// every level — including Low — a fill that's clearly different from the neutral "off" state.
+const IMPORTANCE_COLORS={1:{bg:"var(--accent)",fg:"#fff",border:"var(--accent)"},2:{bg:"#F4C430",fg:"#1a1a1a",border:"#F4C430"},3:{bg:"#1E3A8A",fg:"#fff",border:"#1E3A8A"}};
+function importanceRowsTable(bu,famId){
+  const rows=COMP_ITEMS.map(item=>{
+    const cfg=getImportanceCfg(bu,famId,item.key)||{value:0,locked:false};
+    const val=Number(cfg.value)||0, locked=!!cfg.locked;
+    const btns=[1,2,3].map(n=>{ const on=val===n; const lbl=["L","M","H"][n-1]; const c=IMPORTANCE_COLORS[n];
+      return `<button class="btn cellbtn ${on?"":"off"}" data-impcfg="${famId}|${item.key}|${n}" title="${["Low","Med","High"][n-1]}" style="width:30px;height:26px;font-size:11.5px;border-radius:6px;border:1px solid ${on?c.border:"var(--line)"};background:${on?c.bg:"var(--card)"};color:${on?c.fg:"var(--sub)"};font-weight:700">${lbl}</button>`; }).join("");
+    return `<tr style="border-top:1px solid var(--lineSoft)">
+      <td style="font-size:12.5px;font-weight:600;padding:8px 12px">${esc(item.label)}</td>
+      <td style="padding:6px 12px"><div class="row" style="gap:5px">${btns}</div></td>
+      <td style="padding:6px 12px;text-align:center">
+        <label class="row" style="gap:5px;font-size:11px;color:var(--sub);cursor:pointer;justify-content:center">
+          <input type="checkbox" data-implock="${famId}|${item.key}" ${locked?"checked":""}/> ${locked?"🔒 Locked":"Unlocked"}
+        </label>
+      </td>
+    </tr>`;
+  }).join("");
+  return `<table style="width:100%">
+    <thead><tr style="background:var(--paper)"><th style="padding:6px 12px">Competency</th><th style="padding:6px 12px">Importance (L / M / H)</th><th style="padding:6px 12px;text-align:center">Lock for this unit</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+function adminImportance(){
+  if(!adminImportanceUnit||!state.cfg.businessUnits.includes(adminImportanceUnit)) adminImportanceUnit=state.bu;
+  ensureImportanceShape();
+  const unitOpts=state.cfg.businessUnits.map(u=>`<option value="${esc(u)}" ${u===adminImportanceUnit?"selected":""}>${esc(u)}</option>`).join("");
+  const familySections=state.cfg.families.map(f=>{
+    const range=familyJGRange(f.id);
+    return `<div class="card" style="margin-bottom:16px;overflow:hidden">
+      <div style="padding:10px 14px;background:var(--paper);border-bottom:1px solid var(--lineSoft)">
+        <span style="font-size:12.5px;font-weight:700;letter-spacing:.02em">${esc(f.name.toUpperCase())}${range?` <span style="font-weight:500;color:var(--faint)">(${range})</span>`:""}</span>
+      </div>
+      ${importanceRowsTable(adminImportanceUnit,f.id)}
+    </div>`;
+  }).join("");
+  return `<div class="row" style="gap:10px;margin-bottom:16px;background:var(--ink);border-radius:10px;color:#fff;padding:10px 16px;flex-wrap:wrap">
+      <span>🏢</span><span style="font-size:12.5px">Department / unit</span>
+      <select id="importanceunit" style="font-size:13px;font-weight:700;padding:4px 8px;border-radius:6px;border:1px solid #3a4440;background:#20302a;color:#fff">${unitOpts}</select>
+      <span style="font-size:11.5px;color:#B9C6C0;margin-left:auto">Each unit keeps its own Importance Rating settings, per job grade family</span></div>
+    <p style="font-size:12.5px;color:var(--sub);line-height:1.5;margin:0 0 12px">Set the Importance Rating (Low / Med / High) for each competency, separately for every job grade family in this department — e.g. a competency can be "High" importance for Specialist (${esc(familyJGRange((state.cfg.families[0]||{}).id))||"JG1–JG3"}) but only "Medium" for Generalist. Lock a row to enforce that value for every evaluation in this unit at that job grade family — evaluators won't be able to override a locked value; unlocked rows are just a suggested default and evaluators can still set their own rating per employee.</p>
+    ${familySections}`;
+}
+function adminDevPlan(){
+  ensureDevPlanShape();
+  const cp=state.cfg.devPlan.conversationalPlanner;
+  const tp=state.cfg.devPlan.trainingPrograms;
+  const compRows=COMP_ITEMS.map(item=>{
+    const byFam=tp[item.key]||{};
+    const total=Object.values(byFam).reduce((n,l)=>n+(l?l.length:0),0);
+    const chips=state.cfg.families.map(f=>{
+      const n=(byFam[f.id]||[]).length;
+      return `<span class="tnum" style="font-size:10px;padding:2px 7px;border-radius:5px;background:${n?"var(--accentSoft)":"var(--paper)"};color:${n?"var(--accent)":"var(--faint)"};font-weight:${n?700:500}">${esc(f.name)} ${n}</span>`;
+    }).join("");
+    const allN=(byFam._all||[]).length;
+    return `<div style="padding:8px 12px;border-top:1px solid var(--lineSoft)">
+      <div class="between" style="margin-bottom:${total?6:0}px">
+        <span style="font-size:12.5px;font-weight:600;flex:1">${esc(item.label)}</span>
+        <span style="font-size:11.5px;color:${total?"var(--sub)":"var(--faint)"}">${total?`${total} training program(s)`:"none uploaded"}</span>
+        ${total?`<button class="btn" data-cleartp="${item.key}" style="background:transparent;border:none;cursor:pointer;color:var(--warn);padding:0 0 0 10px">🗑</button>`:""}
+      </div>
+      ${total?`<div class="row" style="gap:6px;flex-wrap:wrap">${chips}${allN?`<span class="tnum" style="font-size:10px;padding:2px 7px;border-radius:5px;background:var(--accentSoft);color:var(--accent);font-weight:700">All Families ${allN}</span>`:""}</div>`:""}
+    </div>`;
+  }).join("");
+  return `<div class="card" style="padding:20px;margin-bottom:16px">
+    <div class="eyebrow" style="margin-bottom:8px">CONVERSATIONAL PLANNER · GAP −1 TO −4</div>
+    <p style="font-size:12.5px;color:var(--sub);line-height:1.5;margin:0 0 12px">Upload the downloadable Conversational Planner form. Whenever a competency's Gap Evaluation falls between −1 and −4, evaluators see a download button for this file in the Development Plan column.</p>
+    <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
+      <button id="uploadCpBtn" class="btn btn-primary" style="display:flex;align-items:center;gap:6px;padding:8px 14px;font-size:13px">⭱ Upload form</button>
+      <input id="uploadCpFile" type="file" style="display:none"/>
+      ${cp?`<button id="clearCpBtn" class="btn btn-warn" style="display:flex;align-items:center;gap:6px;padding:8px 14px;font-size:13px">🗑 Remove</button>`:""}
+      <span style="font-size:12px;color:${cp?"var(--sub)":"var(--faint)"};align-self:center">${cp?`Uploaded: ${esc(cp.name)}`:"No form uploaded yet"}</span>
+    </div>
+  </div>
+  <div class="card" style="padding:20px">
+    <div class="eyebrow" style="margin-bottom:8px">TRAINING PROGRAM LISTS · GAP −5 AND BEYOND</div>
+    <p style="font-size:12.5px;color:var(--sub);line-height:1.5;margin:0 0 12px">Upload an Excel file listing the training programs per competency <b>and</b> job family (columns <b>Competency</b>, <b>Job Family</b>, and <b>Training Program</b>, one row per program), or add/edit/remove individual programs one at a time below. The downloaded template pre-fills one row per competency for each job family currently defined under Admin → Family Multipliers — leave <b>Job Family</b> blank or set it to "All Families" for a program that should show up regardless of job family. Whenever a competency's Gap Evaluation is −5 or worse, evaluators see the training list for that competency filtered to the job family tied to the employee's Job Progression Standard level (target/aspired Job Grade), plus anything uploaded under "All Families". Re-importing merges into, and replaces, each matched competency + job family combination.</p>
+    <div class="row" style="gap:8px;flex-wrap:wrap">
+      <button id="tpTemplateBtn" class="btn btn-ghost" style="display:flex;align-items:center;gap:6px;padding:8px 14px;font-size:13px">⭳ Download template (.xlsx)</button>
+      <button id="impTpBtn" class="btn btn-primary" style="display:flex;align-items:center;gap:6px;padding:8px 14px;font-size:13px">⭱ Import training list (.xlsx)</button>
+      <input id="impTpFile" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none"/>
+    </div>
+    <div style="margin-top:14px;border:1px solid var(--lineSoft);border-radius:10px;overflow:hidden">${compRows}</div>
+    ${trainingProgramManualEditor()}
+  </div>`;
+}
+// Lets the admin add, rename, or remove individual training-program entries for one
+// competency + job family combination at a time, without needing to re-upload a
+// whole spreadsheet — the bulk Excel import above stays as the fast path for loading many at once.
+function trainingProgramManualEditor(){
+  const tp=state.cfg.devPlan.trainingPrograms;
+  if(!adminTPCompKey || !COMP_ITEMS.find(it=>it.key===adminTPCompKey)) adminTPCompKey=COMP_ITEMS[0].key;
+  const famChoices=[{id:"_all",name:"All Families"}].concat(state.cfg.families.map(f=>({id:f.id,name:f.name})));
+  if(!adminTPFamId || !famChoices.find(f=>f.id===adminTPFamId)) adminTPFamId="_all";
+  const compSelectOptions=COMP_ITEMS.map(it=>`<option value="${esc(it.key)}" ${it.key===adminTPCompKey?"selected":""}>${esc(it.label)}</option>`).join("");
+  const famSelectOptions=famChoices.map(f=>`<option value="${esc(f.id)}" ${f.id===adminTPFamId?"selected":""}>${esc(f.name)}</option>`).join("");
+  const curList=(tp[adminTPCompKey]&&tp[adminTPCompKey][adminTPFamId])||[];
+  const listRows=curList.map((name,idx)=>`<div class="row" style="gap:6px;margin-bottom:6px">
+      <input class="inp" data-tpitem="${idx}" value="${esc(name)}" style="flex:1;font-size:12.5px;padding:6px 8px"/>
+      <button class="btn" data-tpdel="${idx}" style="background:transparent;border:none;cursor:pointer;color:var(--warn);padding:2px 8px" title="Remove">🗑</button>
+    </div>`).join("");
+  return `<div style="margin-top:20px;border-top:1px solid var(--lineSoft);padding-top:16px">
+    <div class="eyebrow" style="margin-bottom:10px">ADD / EDIT / REMOVE PROGRAMS MANUALLY</div>
+    <div class="row" style="gap:10px;margin-bottom:12px;flex-wrap:wrap">
+      <label class="field" style="flex:1 1 220px;min-width:180px"><div style="font-size:11px;color:var(--sub);font-weight:600;margin-bottom:4px">Competency</div><select class="inp" id="tpCompSelect">${compSelectOptions}</select></label>
+      <label class="field" style="flex:1 1 180px;min-width:160px"><div style="font-size:11px;color:var(--sub);font-weight:600;margin-bottom:4px">Job family</div><select class="inp" id="tpFamSelect">${famSelectOptions}</select></label>
+    </div>
+    <div id="tpListEditor">
+      ${listRows||`<div style="font-size:12px;color:var(--faint);font-style:italic;margin-bottom:10px">No programs yet for this competency + job family.</div>`}
+    </div>
+    <div class="row" style="gap:8px;margin-top:4px">
+      <input class="inp" id="tpNewProgram" placeholder="Add a training program…" style="flex:1"/>
+      <button id="tpAddBtn" class="btn btn-primary" style="padding:8px 14px;font-size:13px">＋ Add</button>
+    </div>
+  </div>`;
+}
+function adminEmployees(){
+  ensureEmployeesShape();
+  const list=state.cfg.employees;
+  const isEditing=adminEditingEmployeeId!=null;
+  const deptOptions=`<option value="">— Any / all units —</option>`+state.cfg.businessUnits.map(u=>`<option value="${esc(u)}" ${adminEmployeeForm.department===u?"selected":""}>${esc(u)}</option>`).join("");
+  const rows=list.map(rec=>`<tr style="border-top:1px solid var(--lineSoft)${String(adminEditingEmployeeId)===String(rec._id)?";background:var(--accentSoft)":""}">
+      <td>${esc(rec.lastName)}</td><td>${esc(rec.firstName)}</td><td>${esc(rec.middleName)}</td>
+      <td>${esc(rec.position)}</td><td style="text-align:center">${rec.jobGrade?"JG"+esc(rec.jobGrade):"—"}</td>
+      <td>${rec.department?esc(rec.department):'<span style="color:var(--faint);font-style:italic">any</span>'}</td>
+      <td style="text-align:center;white-space:nowrap">
+        <button class="btn" data-editemp="${esc(rec._id)}" style="background:transparent;border:none;cursor:pointer;color:var(--sub);padding:2px 6px" title="Edit">✎</button>
+        <button class="btn" data-delemp="${esc(rec._id)}" style="background:transparent;border:none;cursor:pointer;color:var(--warn);padding:2px 6px" title="Delete">🗑</button>
+      </td>
+    </tr>`).join("");
+  return `<div class="card" style="padding:20px;margin-bottom:16px">
+    <p style="font-size:12.5px;color:var(--sub);line-height:1.5;margin:0 0 14px">Import the employee master list from Excel, or add/edit/delete employees one at a time below (columns like <b>Last Name</b>, <b>First Name</b>, <b>Middle Name</b>, <b>Position</b>, <b>Job Grade</b>, and optionally <b>Department</b>). Once added, employees appear as a searchable dropdown on the Evaluate and Development tabs — selecting one auto-fills Position and Current Job Grade. Importing replaces the current list; adding/editing/deleting one at a time doesn't.</p>
+    <div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:16px">
+      <button id="empTemplateBtn" class="btn btn-ghost" style="display:flex;align-items:center;gap:6px;padding:8px 14px;font-size:13px">⭳ Download template (.xlsx)</button>
+      <button id="impEmpBtn" class="btn btn-primary" style="display:flex;align-items:center;gap:6px;padding:8px 14px;font-size:13px">⭱ Import employees (.xlsx)</button>
+      <input id="impEmpFile" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none"/>
+      <button id="clearEmpBtn" class="btn btn-warn" style="display:flex;align-items:center;gap:6px;padding:8px 14px;font-size:13px" ${list.length?"":"disabled"}>🗑 Clear list</button>
+      <span style="font-size:12px;color:var(--faint);align-self:center">${list.length} employee(s)</span>
+    </div>
+    <div style="border-top:1px solid var(--lineSoft);padding-top:16px">
+      <div class="eyebrow" style="margin-bottom:10px">${isEditing?"EDIT EMPLOYEE":"ADD EMPLOYEE MANUALLY"}</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+        <label class="field" style="flex:1 1 160px;min-width:140px"><div style="font-size:11px;color:var(--sub);font-weight:600;margin-bottom:4px">Last name</div><input class="inp" id="empf-last" value="${esc(adminEmployeeForm.lastName)}" placeholder="Last name"/></label>
+        <label class="field" style="flex:1 1 160px;min-width:140px"><div style="font-size:11px;color:var(--sub);font-weight:600;margin-bottom:4px">First name</div><input class="inp" id="empf-first" value="${esc(adminEmployeeForm.firstName)}" placeholder="First name"/></label>
+        <label class="field" style="flex:1 1 140px;min-width:120px"><div style="font-size:11px;color:var(--sub);font-weight:600;margin-bottom:4px">Middle name</div><input class="inp" id="empf-mid" value="${esc(adminEmployeeForm.middleName)}" placeholder="Middle name"/></label>
+        <label class="field" style="flex:1 1 200px;min-width:160px"><div style="font-size:11px;color:var(--sub);font-weight:600;margin-bottom:4px">Position</div><input class="inp" id="empf-pos" value="${esc(adminEmployeeForm.position)}" placeholder="Position / job title"/></label>
+        <label class="field" style="flex:1 1 120px;min-width:100px"><div style="font-size:11px;color:var(--sub);font-weight:600;margin-bottom:4px">Job grade</div><input class="inp" id="empf-jg" value="${esc(adminEmployeeForm.jobGrade)}" placeholder="e.g. 4"/></label>
+        <label class="field" style="flex:1 1 180px;min-width:150px"><div style="font-size:11px;color:var(--sub);font-weight:600;margin-bottom:4px">Department</div><select class="inp" id="empf-dept">${deptOptions}</select></label>
+      </div>
+      <div class="row" style="gap:8px">
+        <button id="empFormSaveBtn" class="btn btn-primary" style="padding:8px 16px;font-size:13px">${isEditing?"💾 Update employee":"＋ Add employee"}</button>
+        ${isEditing?`<button id="empFormCancelBtn" class="btn btn-ghost" style="padding:8px 16px;font-size:13px">Cancel</button>`:""}
+      </div>
+    </div>
+  </div>
+  ${list.length?`<div class="card" style="overflow:hidden"><div style="overflow-x:auto"><table style="min-width:760px">
+    <thead><tr style="background:var(--paper)"><th>Last name</th><th>First name</th><th>Middle name</th><th>Position</th><th style="text-align:center">Job grade</th><th>Department</th><th style="text-align:center">Actions</th></tr></thead>
+    <tbody>${rows}</tbody></table></div></div>`:""}`;
+}
+function adminUnits(){
+  const items=state.cfg.businessUnits.map(u=>{
+    const active=u===state.bu;
+    return `<div class="between" style="padding:8px 12px;border:1px solid ${active?"var(--accent)":"var(--lineSoft)"};border-radius:8px;background:${active?"var(--accentSoft)":"var(--card)"}">
+      <span class="row" style="gap:8px;font-size:13.5px;font-weight:550">🏢 ${esc(u)} ${active?'<span style="font-size:10.5px;font-weight:700;color:var(--accent)">· selected</span>':""}</span>
+      <button class="btn" data-delunit="${esc(u)}" ${state.cfg.businessUnits.length<=1?"disabled":""} style="background:transparent;border:none;cursor:${state.cfg.businessUnits.length<=1?"not-allowed":"pointer"};color:${state.cfg.businessUnits.length<=1?"var(--faint)":"var(--warn)"};opacity:${state.cfg.businessUnits.length<=1?.4:1}">🗑</button>
+    </div>`;
+  }).join("");
+  return `<div class="card" style="padding:20px;max-width:540px">
+    <p style="font-size:12.5px;color:var(--sub);line-height:1.5;margin:0 0 14px">Each unit keeps its own sections, sub-sections, definitions and weights. A new unit starts from the base framework — edit it under <b>Definitions &amp; Weights</b> while that unit is selected.</p>
+    <div class="row" style="gap:8px;margin-bottom:16px">
+      <input id="newunit" class="inp" placeholder="Add a business unit…" style="flex:1"/>
+      <button id="addunit" class="btn btn-primary" style="display:flex;align-items:center;gap:6px;padding:8px 14px;font-size:13px">＋ Add</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px">${items}</div>
+  </div>`;
+}
+function adminUsers(){
+  ensureUsersShape();
+  const list=state.cfg.users;
+  const f=adminUserForm;
+  const rows=list.map(rec=>{
+    const isSelf=authUser && String(authUser.id)===String(rec.id);
+    const isEditingPw=String(adminEditingUserId)===String(rec.id);
+    return `<tr style="border-top:1px solid var(--lineSoft)">
+      <td style="font-weight:600">${esc(rec.username)}${isSelf?' <span style="font-size:10px;color:var(--accent);font-weight:700">(you)</span>':""}</td>
+      <td style="text-align:center">
+        <select data-userrole="${esc(rec.id)}" style="font-size:12px;padding:4px 6px;border-radius:6px;border:1px solid var(--line);background:var(--card)">
+          <option value="Admin" ${rec.role==="Admin"?"selected":""}>Admin</option>
+          <option value="Evaluator" ${rec.role==="Evaluator"?"selected":""}>Evaluator</option>
+        </select>
+      </td>
+      <td style="text-align:center;white-space:nowrap">
+        <button class="btn" data-editpw="${esc(rec.id)}" style="background:transparent;border:1px solid var(--line);border-radius:6px;cursor:pointer;color:var(--sub);padding:4px 8px;font-size:11.5px">🔑 Reset password</button>
+        <button class="btn" data-deluser="${esc(rec.id)}" ${isSelf?"disabled":""} style="background:transparent;border:none;cursor:${isSelf?"not-allowed":"pointer"};color:${isSelf?"var(--faint)":"var(--warn)"};padding:4px 6px;opacity:${isSelf?.4:1}" title="Delete">🗑</button>
+      </td>
+    </tr>${isEditingPw?`<tr style="background:var(--accentSoft)"><td colspan="3" style="padding:10px 12px">
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <input type="password" class="inp" id="pwNew" placeholder="New password (min 6 characters)" style="flex:1 1 200px"/>
+        <input type="password" class="inp" id="pwConfirm" placeholder="Confirm new password" style="flex:1 1 200px"/>
+        <button id="pwSaveBtn" class="btn btn-primary" style="padding:8px 14px;font-size:12.5px">Save new password</button>
+        <button id="pwCancelBtn" class="btn btn-ghost" style="padding:8px 14px;font-size:12.5px">Cancel</button>
+      </div>
+    </td></tr>`:""}`;
+  }).join("");
+  return `<div class="card" style="padding:20px;margin-bottom:16px">
+    <p style="font-size:12.5px;color:var(--sub);line-height:1.5;margin:0 0 14px">Everyone who uses this tool signs in with their own account — there's no shared password. <b>Admin</b> accounts can see and change everything, including this panel; <b>Evaluator</b> accounts can only use Evaluate, Development and Report. Passwords are stored only as one-way hashes — nobody, including you, can look up someone's existing password; use <b>Reset password</b> to set a new one for someone who forgot theirs.</p>
+    <div class="eyebrow" style="margin-bottom:10px">ADD USER</div>
+    <div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:20px">
+      <input class="inp" id="newUserName" placeholder="Username" value="${esc(f.username)}" style="flex:1 1 160px"/>
+      <input type="password" class="inp" id="newUserPw" placeholder="Password (min 6 characters)" style="flex:1 1 180px"/>
+      <input type="password" class="inp" id="newUserPw2" placeholder="Confirm password" style="flex:1 1 180px"/>
+      <select class="inp" id="newUserRole" style="flex:0 0 140px">
+        <option value="Evaluator" ${f.role==="Evaluator"?"selected":""}>Evaluator</option>
+        <option value="Admin" ${f.role==="Admin"?"selected":""}>Admin</option>
+      </select>
+      <button id="addUserBtn" class="btn btn-primary" style="padding:8px 16px;font-size:13px">＋ Add user</button>
+    </div>
+    <div style="border-top:1px solid var(--lineSoft);padding-top:16px">
+      <div class="eyebrow" style="margin-bottom:10px">${list.length} ACCOUNT(S)</div>
+      ${list.length?`<div class="card" style="overflow:hidden"><table>
+        <thead><tr style="background:var(--paper)"><th>Username</th><th style="text-align:center">Role</th><th style="text-align:center">Actions</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`:`<div style="font-size:12.5px;color:var(--faint);font-style:italic">No accounts yet.</div>`}
+    </div>
+  </div>`;
+}
+function wireAdmin(){
+  document.querySelectorAll("#view [data-apanel]").forEach(b=>b.onclick=()=>{ adminPanel=b.dataset.apanel; renderView(); });
+  // Scoped to whichever Admin tab is open (see RESETTABLE_PANELS / resetAdminPanelToDefault above) —
+  // resetting Grade Bands, say, must never also reset Family Multipliers, Business Units, or any of
+  // the other-module data (Employees, Competency Importance, Role Expectations, Development Plan).
+  const rc=document.getElementById("resetcfg"); if(rc)rc.onclick=()=>{
+    const info=RESETTABLE_PANELS[adminPanel];
+    if(!info) return;
+    if(confirm(`Reset ${info.label} to defaults?\n\nThis resets ${info.detail()}.\n\nNothing else on this Admin tab — no other module, business unit, or saved data — is affected.`)){
+      resetAdminPanelToDefault(adminPanel);
+    }
+  };
+  // weights
+  document.querySelectorAll("#view [data-asec]").forEach(b=>b.onclick=()=>{ const id=b.dataset.asec; adminOpenSec=adminOpenSec===id?null:id; renderView(); });
+  document.querySelectorAll("#view [data-def]").forEach(t=>t.oninput=()=>{ const [s,su,c]=t.dataset.def.split("|"); editFramework(fw=>{ fw.find(x=>x.id===s).subs.find(x=>x.id===su).choices.find(x=>x.id===c).def=t.value; }); });
+  document.querySelectorAll("#view [data-wt]").forEach(t=>t.oninput=()=>{ const [s,su]=t.dataset.wt.split("|"); editFramework(fw=>{ fw.find(x=>x.id===s).subs.find(x=>x.id===su).weight=parseFloat(t.value)||0; }); refreshWtBanner(); });
+  // multipliers
+  const baseInp=document.querySelector("#view [data-base]"); if(baseInp)baseInp.oninput=()=>{ state.cfg.base=parseFloat(baseInp.value)||0; scheduleSave(); updateMultLabels(); };
+  document.querySelectorAll("#view [data-fname]").forEach(inp=>inp.oninput=()=>{ state.cfg.families[+inp.dataset.fname].name=inp.value; scheduleSave(); });
+  document.querySelectorAll("#view [data-ffactor]").forEach(inp=>inp.oninput=()=>{ state.cfg.families[+inp.dataset.ffactor].factor=parseFloat(inp.value)||0; scheduleSave(); updateMultLabels(); });
+  document.querySelectorAll("#view [data-fprof]").forEach(inp=>inp.oninput=()=>{ let v=parseInt(inp.value,10); if(isNaN(v))v=1; v=Math.max(1,Math.min(5,v)); state.cfg.families[+inp.dataset.fprof].profStandard=v; scheduleSave(); });
+  // bands
+  document.querySelectorAll("#view [data-jgmin]").forEach(inp=>inp.oninput=()=>{ state.cfg.jg[+inp.dataset.jgmin].min=parseInt(inp.value)||0; scheduleSave(); });
+  document.querySelectorAll("#view [data-jgmax]").forEach(inp=>inp.oninput=()=>{ state.cfg.jg[+inp.dataset.jgmax].max=parseInt(inp.value)||0; scheduleSave(); });
+  document.querySelectorAll("#view [data-jgfam]").forEach(sel=>sel.onchange=()=>{ state.cfg.jg[+sel.dataset.jgfam].fam=sel.value; scheduleSave(); });
+  // role expectations
+  const reu=document.getElementById("roleexpunit"); if(reu)reu.onchange=()=>{ adminRoleExpUnit=reu.value; renderView(); };
+  document.querySelectorAll("#view [data-roleexp]").forEach(t=>t.oninput=()=>{ setRoleExp(adminRoleExpUnit,+t.dataset.roleexp,t.value); });
+  const expBtn=document.getElementById("expRoleExp"); if(expBtn)expBtn.onclick=exportRoleExpectations;
+  const impBtn=document.getElementById("impRoleExp"), impFile=document.getElementById("impRoleExpFile");
+  if(impBtn&&impFile)impBtn.onclick=()=>impFile.click();
+  if(impFile)impFile.onchange=()=>{ if(impFile.files&&impFile.files[0]) importRoleExpectations(impFile.files[0]); impFile.value=""; };
+  // competency importance
+  const iu=document.getElementById("importanceunit"); if(iu)iu.onchange=()=>{ adminImportanceUnit=iu.value; renderView(); };
+  document.querySelectorAll("#view [data-impcfg]").forEach(b=>b.onclick=()=>{ const [f,k,n]=b.dataset.impcfg.split("|"); setImportanceCfg(adminImportanceUnit,f,k,{value:Number(n)}); renderView(); });
+  document.querySelectorAll("#view [data-implock]").forEach(cb=>cb.onchange=()=>{ const [f,k]=cb.dataset.implock.split("|"); setImportanceCfg(adminImportanceUnit,f,k,{locked:cb.checked}); renderView(); });
+  // development plan
+  const uploadCpBtn=document.getElementById("uploadCpBtn"), uploadCpFile=document.getElementById("uploadCpFile");
+  if(uploadCpBtn&&uploadCpFile)uploadCpBtn.onclick=()=>uploadCpFile.click();
+  if(uploadCpFile)uploadCpFile.onchange=()=>{ if(uploadCpFile.files&&uploadCpFile.files[0]) uploadConversationalPlanner(uploadCpFile.files[0]); uploadCpFile.value=""; };
+  const clearCpBtn=document.getElementById("clearCpBtn"); if(clearCpBtn)clearCpBtn.onclick=clearConversationalPlanner;
+  const tpTemplateBtn=document.getElementById("tpTemplateBtn"); if(tpTemplateBtn)tpTemplateBtn.onclick=downloadTrainingTemplate;
+  const impTpBtn=document.getElementById("impTpBtn"), impTpFile=document.getElementById("impTpFile");
+  if(impTpBtn&&impTpFile)impTpBtn.onclick=()=>impTpFile.click();
+  if(impTpFile)impTpFile.onchange=()=>{ if(impTpFile.files&&impTpFile.files[0]) importTrainingPrograms(impTpFile.files[0]); impTpFile.value=""; };
+  document.querySelectorAll("#view [data-cleartp]").forEach(b=>b.onclick=()=>clearTrainingProgram(b.dataset.cleartp));
+  // employees
+  const empTemplateBtn=document.getElementById("empTemplateBtn"); if(empTemplateBtn)empTemplateBtn.onclick=downloadEmployeeTemplate;
+  const impEmpBtn=document.getElementById("impEmpBtn"), impEmpFile=document.getElementById("impEmpFile");
+  if(impEmpBtn&&impEmpFile)impEmpBtn.onclick=()=>impEmpFile.click();
+  if(impEmpFile)impEmpFile.onchange=()=>{ if(impEmpFile.files&&impEmpFile.files[0]) importEmployees(impEmpFile.files[0]); impEmpFile.value=""; };
+  const clearEmpBtn=document.getElementById("clearEmpBtn"); if(clearEmpBtn)clearEmpBtn.onclick=clearEmployees;
+  // manual employee add/edit form — updates the in-memory form object per keystroke without a
+  // full re-render (which would drop focus mid-type), and only re-renders on save/cancel/edit/delete.
+  const ef_last=document.getElementById("empf-last"), ef_first=document.getElementById("empf-first"),
+        ef_mid=document.getElementById("empf-mid"), ef_pos=document.getElementById("empf-pos"),
+        ef_jg=document.getElementById("empf-jg"), ef_dept=document.getElementById("empf-dept");
+  if(ef_last)ef_last.oninput=()=>adminEmployeeForm.lastName=ef_last.value;
+  if(ef_first)ef_first.oninput=()=>adminEmployeeForm.firstName=ef_first.value;
+  if(ef_mid)ef_mid.oninput=()=>adminEmployeeForm.middleName=ef_mid.value;
+  if(ef_pos)ef_pos.oninput=()=>adminEmployeeForm.position=ef_pos.value;
+  if(ef_jg)ef_jg.oninput=()=>adminEmployeeForm.jobGrade=ef_jg.value;
+  if(ef_dept)ef_dept.onchange=()=>adminEmployeeForm.department=ef_dept.value;
+  const empFormSaveBtn=document.getElementById("empFormSaveBtn"); if(empFormSaveBtn)empFormSaveBtn.onclick=saveEmployeeManual;
+  const empFormCancelBtn=document.getElementById("empFormCancelBtn"); if(empFormCancelBtn)empFormCancelBtn.onclick=cancelEditEmployee;
+  document.querySelectorAll("#view [data-editemp]").forEach(b=>b.onclick=()=>startEditEmployee(b.dataset.editemp));
+  document.querySelectorAll("#view [data-delemp]").forEach(b=>b.onclick=()=>deleteEmployeeManual(b.dataset.delemp));
+  // manual training-program editor (competency + job family selectors, add/rename/remove one entry at a time)
+  const tpCompSel=document.getElementById("tpCompSelect"); if(tpCompSel)tpCompSel.onchange=()=>{ adminTPCompKey=tpCompSel.value; renderView(); };
+  const tpFamSel=document.getElementById("tpFamSelect"); if(tpFamSel)tpFamSel.onchange=()=>{ adminTPFamId=tpFamSel.value; renderView(); };
+  document.querySelectorAll("#view [data-tpitem]").forEach(inp=>inp.onblur=()=>{ updateTrainingProgramManual(adminTPCompKey,adminTPFamId,+inp.dataset.tpitem,inp.value); });
+  document.querySelectorAll("#view [data-tpdel]").forEach(b=>b.onclick=()=>deleteTrainingProgramManual(adminTPCompKey,adminTPFamId,+b.dataset.tpdel));
+  const tpNewInput=document.getElementById("tpNewProgram"), tpAddBtn=document.getElementById("tpAddBtn");
+  function doAddTP(){ if(!tpNewInput) return; addTrainingProgramManual(adminTPCompKey,adminTPFamId,tpNewInput.value); }
+  if(tpAddBtn)tpAddBtn.onclick=doAddTP;
+  if(tpNewInput)tpNewInput.onkeydown=(e)=>{ if(e.key==="Enter") doAddTP(); };
+  // units
+  const add=document.getElementById("addunit"), ni=document.getElementById("newunit");
+  function doAdd(){ const v=(ni.value||"").trim(); if(!v||state.cfg.businessUnits.includes(v))return; state.cfg.businessUnits.push(v); state.cfg.frameworks[v]=cloneFramework(); state.cfg.roleExpectations[v]={}; state.cfg.competencyImportance[v]={}; scheduleSave(); renderBU(); renderView(); }
+  if(add)add.onclick=doAdd; if(ni)ni.onkeydown=(e)=>{ if(e.key==="Enter")doAdd(); };
+  document.querySelectorAll("#view [data-delunit]").forEach(b=>b.onclick=()=>{ const u=b.dataset.delunit; if(state.cfg.businessUnits.length<=1)return; state.cfg.businessUnits=state.cfg.businessUnits.filter(x=>x!==u); delete state.cfg.frameworks[u]; delete state.cfg.roleExpectations[u]; delete state.cfg.competencyImportance[u]; if(adminRoleExpUnit===u)adminRoleExpUnit=null; if(adminImportanceUnit===u)adminImportanceUnit=null; if(state.bu===u){ state.bu=state.cfg.businessUnits[0]; state.currentEmployeeId=""; ensureSession(); } scheduleSave(); renderBU(); renderView(); });
+  // users & access
+  const addUserBtn=document.getElementById("addUserBtn");
+  if(addUserBtn) addUserBtn.onclick=()=>{
+    adminUserForm.username=(document.getElementById("newUserName")||{}).value||"";
+    adminUserForm.password=(document.getElementById("newUserPw")||{}).value||"";
+    adminUserForm.confirm=(document.getElementById("newUserPw2")||{}).value||"";
+    adminUserForm.role=(document.getElementById("newUserRole")||{}).value||"Evaluator";
+    adminAddUser();
+  };
+  document.querySelectorAll("#view [data-userrole]").forEach(sel=>sel.onchange=()=>adminSetUserRole(sel.dataset.userrole, sel.value));
+  document.querySelectorAll("#view [data-editpw]").forEach(b=>b.onclick=()=>{ adminEditingUserId=b.dataset.editpw; renderView(); });
+  document.querySelectorAll("#view [data-deluser]").forEach(b=>b.onclick=()=>adminDeleteUser(b.dataset.deluser));
+  const pwSaveBtn=document.getElementById("pwSaveBtn");
+  if(pwSaveBtn) pwSaveBtn.onclick=()=>{
+    const pwd=(document.getElementById("pwNew")||{}).value||"";
+    const confirmPwd=(document.getElementById("pwConfirm")||{}).value||"";
+    adminResetUserPassword(adminEditingUserId, pwd, confirmPwd);
+  };
+  const pwCancelBtn=document.getElementById("pwCancelBtn");
+  if(pwCancelBtn) pwCancelBtn.onclick=()=>{ adminEditingUserId=null; renderView(); };
+}
+function updateMultLabels(){ const m=familyMultipliers(); m.forEach((f,i)=>{ const el=document.getElementById("mult-eff-"+i); if(el)el.textContent="×"+f.mult; }); }
+
+/* ================= INIT ================= */
+async function init(){
+  const [c,b,s,ce]=await Promise.all([loadKey(KEY_CFG),loadKey(KEY_BU),loadKey(KEY_SEL),loadKey(KEY_CUR_EMP)]);
+  const hadLocalCache=!!(c||b||s||ce); // this browser has opened the tool before, vs. a brand-new device
+  if(c&&c.frameworks)state.cfg=c;
+  if(b)state.bu=b;
+  if(s)state.sessions=s;
+  if(ce)state.currentEmployeeId=ce;
+  if(!state.cfg.businessUnits.includes(state.bu))state.bu=state.cfg.businessUnits[0];
+  if(!state.cfg.frameworks[state.bu])state.cfg.frameworks[state.bu]=cloneFramework();
+  ensureAllShapes();
+  migrateLegacySessions();
+  // A previously-selected employee may since have been deleted (or this may be a stale value from
+  // before employee-scoped sessions existed) — don't let a dangling ID silently reload someone else's
+  // ID slot or a session that no longer corresponds to a real person.
+  if(state.currentEmployeeId && !findEmployeeById(state.currentEmployeeId)) state.currentEmployeeId="";
+  ensureSession();
+  framework().forEach(sec=>{ if(openSecs[sec.id]===undefined)openSecs[sec.id]=true; });
+
+  // Restore a previously-signed-in account on THIS device/browser, if that account still exists —
+  // this only reads back which user id was signed in; the password itself is never stored anywhere.
+  try{
+    const savedSession=localStorage.getItem(KEY_SESSION);
+    if(savedSession){
+      const sd=JSON.parse(savedSession);
+      const rec=sd&&sd.id?findUserById(sd.id):null;
+      if(rec) authUser={id:rec.id, username:rec.username, role:rec.role};
+      else localStorage.removeItem(KEY_SESSION); // account no longer exists — force a fresh sign-in
+    }
+  }catch(e){}
+
+  // If this device has never cached anything locally (a new phone/PC, or a cleared browser) and
+  // cloud sync is configured, don't render yet with empty/default data — that would make opening the
+  // link on another device look like everything got reset. Keep showing nothing until the cloud pull
+  // resolves one way or another, then render with whatever that pull actually found.
+  const shouldWaitForCloud=!hadLocalCache && firebaseReady();
+  if(!shouldWaitForCloud){ renderBU(); renderTabs(); renderAuthBar(); renderView(); }
+
+  // Cloud sync: pull the latest shared data from Firebase (may override the local/window.storage
+  // snapshot above if another device has newer data), then keep listening for live updates.
+  updateSyncBadge(firebaseReady()?"syncing":"unconfigured");
+  if(firebaseReady()) await ensureFirebaseAuth(); // don't attempt a read until signed in, or DB rules reject it
+  await pullFromCloud();
+  if(shouldWaitForCloud){ renderBU(); renderTabs(); renderAuthBar(); renderView(); }
+  startRealtimeSync();
+}
+init();
+const _syncBadgeEl=document.getElementById("syncBadge");
+if(_syncBadgeEl) _syncBadgeEl.onclick=manualSync;
+</script>
