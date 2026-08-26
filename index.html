@@ -1,3 +1,6 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Role Profile</title>
@@ -76,6 +79,8 @@
   }
   @media print{ #syncBadge,#syncFailBanner{display:none !important} }
 </style>
+</head>
+<body>
 
 <div id="syncFailBanner">⚠ Your last change could not be saved to the cloud (check your internet connection or Firebase database rules). It's kept safely in this browser only — reopening this site elsewhere may not show it yet.</div>
 <header class="no-print">
@@ -155,13 +160,13 @@ window.addEventListener("beforeunload", flushSaveSync);
    blank. Use a dedicated Firebase project/database for this tool (separate from any
    other tool's), so there's no shared quota or node-collision risk. */
 const FIREBASE_CONFIG = {
-  apiKey: "",
-  authDomain: "",
-  databaseURL: "",
-  projectId: "",
-  storageBucket: "",
-  messagingSenderId: "",
-  appId: ""
+  apiKey: "AIzaSyBWtinmq-C0INz2A_exDBXLFDA2gq3CObw",
+  authDomain: "role-profiler.firebaseapp.com",
+  databaseURL: "https://role-profiler-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "role-profiler",
+  storageBucket: "role-profiler.firebasestorage.app",
+  messagingSenderId: "839217887103",
+  appId: "1:839217887103:web:65bd0b44909f0031a68c4a"
 };
 const FIREBASE_SYNC_PATH = "pgbRoleProfile"; // node in the Realtime Database that holds this tool's shared config/sessions
 
@@ -2355,3 +2360,5 @@ init();
 const _syncBadgeEl=document.getElementById("syncBadge");
 if(_syncBadgeEl) _syncBadgeEl.onclick=manualSync;
 </script>
+</body>
+</html>
