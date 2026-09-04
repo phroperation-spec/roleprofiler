@@ -121,7 +121,37 @@ const L = ["a","b","c","d","e"];
 const cIndex = (id)=>L.indexOf(id);
 
 /* ---------- storage (synced, auto-save) ---------- */
-const KEY_CFG="progression:config:v4", KEY_BU="progression:selectedBU:v4", KEY_SEL="progression:sessions:v4", KEY_CUR_EMP="progression:currentEmployee:v4";
+const KEY_CFG="progression:config:v4", KEY_BU_BASE="progression:selectedBU:v4", KEY_SEL="progression:sessions:v4", KEY_CUR_EMP_BASE="progression:currentEmployee:v4";
+const KEY_LAST_UPDATED="progression:lastKnownUpdatedAt:v1"; // see the stale-write guard in pushToCloud() below
+// Navigation/UI state — which business unit and which employee's evaluation is currently open on
+// screen — is LOCAL to this device and scoped to whichever account is signed in on it. It never
+// travels through Firebase (see pushToCloud/applyRemoteData below): the whole point is that one
+// signed-in account switching business units or opening a different employee must never move
+// anyone else's screen. Scoping the storage key by account id (not just device) also keeps two
+// different accounts that happen to share one browser from leaking this into each other after
+// logging in as someone else. Falls back to a generic bucket before anyone's signed in.
+function navScope(){ return authUser ? authUser.id : "_signedout"; }
+function keyBU(){ return KEY_BU_BASE+":"+navScope(); }
+function keyCurEmp(){ return KEY_CUR_EMP_BASE+":"+navScope(); }
+// Loads whichever business unit / employee this signed-in account (or the signed-out bucket)
+// last had open ON THIS DEVICE, and applies it to state with the same validation init() has always
+// done for these fields. Called after authUser changes (login, first-admin-setup, logout) so the
+// screen resumes exactly where THIS account left off — never where some other account or device is.
+async function loadNavStateForAccount(){
+  let [bu,curEmp]=await Promise.all([loadKey(keyBU()),loadKey(keyCurEmp())]);
+  // One-time migration: before this per-account isolation fix, the selected business unit/employee
+  // was stored under a single flat key shared by every account on this device (KEY_BU_BASE/
+  // KEY_CUR_EMP_BASE with no account suffix). If this account has never had its own scoped value
+  // saved yet, fall back to that legacy flat value once so the business unit you were already
+  // looking at (and its weights/role expectations/etc, which were never touched) keeps showing —
+  // instead of silently jumping to the first business unit in the list. Every save from here on
+  // writes the account-scoped key, so this fallback only matters for the very first load.
+  if(bu==null) bu=await loadKey(KEY_BU_BASE);
+  if(curEmp==null) curEmp=await loadKey(KEY_CUR_EMP_BASE);
+  state.bu = (bu && state.cfg.businessUnits.includes(bu)) ? bu : state.cfg.businessUnits[0];
+  state.currentEmployeeId = (curEmp && findEmployeeById(curEmp)) ? curEmp : "";
+  ensureSession();
+}
 async function loadKey(k){
   if(window.storage){
     try{ const r=await window.storage.get(k); return r?JSON.parse(r.value):null; }catch(e){}
@@ -138,12 +168,17 @@ function flushSaveSync(){
   // Runs synchronously right before the tab/window closes, so the very
   // last edit is captured even if it happened inside the 400ms debounce.
   try{ localStorage.setItem(KEY_CFG,JSON.stringify(state.cfg)); }catch(e){}
-  try{ localStorage.setItem(KEY_BU,JSON.stringify(state.bu)); }catch(e){}
+  try{ localStorage.setItem(keyBU(),JSON.stringify(state.bu)); }catch(e){}
   try{ localStorage.setItem(KEY_SEL,JSON.stringify(state.sessions)); }catch(e){}
-  try{ localStorage.setItem(KEY_CUR_EMP,JSON.stringify(state.currentEmployeeId)); }catch(e){}
+  try{ localStorage.setItem(keyCurEmp(),JSON.stringify(state.currentEmployeeId)); }catch(e){}
 }
 window.addEventListener("pagehide", flushSaveSync);
-window.addEventListener("beforeunload", flushSaveSync);
+window.addEventListener("beforeunload", (e)=>{
+  flushSaveSync();
+  // Role Expectations text is deliberately NOT auto-saved (see setRoleExp/saveRoleExpectations) —
+  // warn before it's lost to a close/refresh nobody meant to do.
+  if(roleExpDirty){ e.preventDefault(); e.returnValue=""; }
+});
 
 /* ---------- Cloud Sync (cross-device, via Firebase Realtime Database) ----------
    Same pattern used by the Employee Demographics tool: every device that opens this
@@ -171,15 +206,25 @@ const FIREBASE_CONFIG = {
 const FIREBASE_SYNC_PATH = "pgbRoleProfile"; // node in the Realtime Database that holds this tool's shared config/sessions
 
 let _fbRef=null;
-let _lastKnownUpdatedAt=0; // used to ignore the echo of our own writes coming back through the live listener
+// The most recent "updatedAt" this session has actually confirmed, either by pulling/receiving it
+// from the cloud or by writing it there itself. Two jobs: (1) recognize the echo of our own writes
+// coming back through the live listener, and (2) — see the stale-write guard in pushToCloud() below —
+// let this session tell whether the copy of cfg/sessions it's about to push is actually based on the
+// latest shared data, or on an older snapshot that must not be allowed to overwrite something newer.
+// Starts at 0 (meaning "unknown") until init() loads whatever this device last confirmed, from
+// KEY_LAST_UPDATED, so that guard still works right after a fresh page load rather than only once a
+// pull has completed in this session.
+let _lastKnownUpdatedAt=0;
 
 // ---- Local-edit guard --------------------------------------------------
-// Edits update state.cfg/bu/sessions/currentEmployeeId locally first and only reach the
-// cloud ~900ms later (see schedulePush). Meanwhile the initial pullFromCloud() and the
-// live listener can resolve with an OLDER snapshot. Without this guard, that older
-// snapshot would silently overwrite whatever was just changed. _localChangeSeq/
-// _syncedChangeSeq track whether there's an edit that hasn't finished pushing yet; while
-// there is, incoming remote snapshots are skipped rather than applied.
+// Edits update state.cfg/sessions (the shared config, roster, and evaluations — the only
+// two fields that travel through Firebase; state.bu/currentEmployeeId are per-account
+// navigation state and never synced, see navScope() near the top of this file) locally
+// first and only reach the cloud ~900ms later (see schedulePush). Meanwhile the initial
+// pullFromCloud() and the live listener can resolve with an OLDER snapshot. Without this
+// guard, that older snapshot would silently overwrite whatever was just changed.
+// _localChangeSeq/_syncedChangeSeq track whether there's an edit that hasn't finished
+// pushing yet; while there is, incoming remote snapshots are skipped rather than applied.
 let _localChangeSeq=0;
 let _syncedChangeSeq=0;
 function markLocalChange(){ _localChangeSeq++; }
@@ -295,17 +340,12 @@ function applyRemoteData(data){
   if(data && data.cfg && data.cfg.frameworks){
     state.cfg=data.cfg;
     if(!state.cfg.businessUnits.includes(state.bu)) state.bu=state.cfg.businessUnits[0];
-    if(!state.cfg.frameworks[state.bu]) state.cfg.frameworks[state.bu]=cloneFramework();
+    if(!state.cfg.frameworks[state.bu]) state.cfg.frameworks[state.bu]=cloneFramework(state.bu);
     ensureAllShapes();
     // If this device's signed-in account was deleted on another device while this remote snapshot
     // was in flight, don't leave it signed in against a user record that no longer exists.
     if(authUser && !findUserById(authUser.id)){ authUser=null; try{ localStorage.removeItem(KEY_SESSION); }catch(e){} }
     saveKey(KEY_CFG,state.cfg);
-    changed=true;
-  }
-  if(data && data.bu && state.cfg.businessUnits.includes(data.bu)){
-    state.bu=data.bu;
-    saveKey(KEY_BU,state.bu);
     changed=true;
   }
   if(data && data.sessions){
@@ -314,13 +354,12 @@ function applyRemoteData(data){
     saveKey(KEY_SEL,state.sessions);
     changed=true;
   }
-  if(data && "currentEmployeeId" in data){
-    state.currentEmployeeId=data.currentEmployeeId||"";
-    if(state.currentEmployeeId && !findEmployeeById(state.currentEmployeeId)) state.currentEmployeeId="";
-    saveKey(KEY_CUR_EMP,state.currentEmployeeId);
-    changed=true;
-  }
-  if(data && data.updatedAt) _lastKnownUpdatedAt=data.updatedAt;
+  // NOTE: data.bu / data.currentEmployeeId are intentionally never read here. Which business unit
+  // and which employee's evaluation is open on screen is per-account navigation state, not shared
+  // data — see the "navigation state" comment above navScope() near the top of this file. Applying
+  // a remote value here is exactly the bug that used to yank other people's screens around whenever
+  // anyone switched business units or opened a different employee.
+  if(data && data.updatedAt){ _lastKnownUpdatedAt=data.updatedAt; saveKey(KEY_LAST_UPDATED,_lastKnownUpdatedAt); }
   if(changed){
     ensureSession();
     renderBU(); renderTabs(); renderAuthBar(); renderView();
@@ -356,15 +395,39 @@ async function pushToCloud(){
   await ensureFirebaseAuth();
   updateSyncBadge("syncing");
   try{
+    // ---- Stale-write guard --------------------------------------------------------------
+    // Before writing, check whether the cloud's current "updatedAt" is newer than the last one this
+    // session has actually confirmed. If it is, someone else's save landed since this session last
+    // synced, and state.cfg/state.sessions here are built on an OLDER snapshot — writing them now
+    // would silently overwrite that newer shared data with older data, wiping it out for everyone.
+    // This is exactly the failure mode that can happen when a device reopens an old cached copy (a
+    // stale local file, a browser that hasn't been used in a while) that doesn't know about work
+    // saved elsewhere since. When this fires: stop, adopt the newer cloud data instead of overwriting
+    // it, and tell the person to redo whatever they just changed on top of the now-current data.
+    const remoteStamp=(await _fbRef.child("updatedAt").once("value")).val()||0;
+    if(remoteStamp && remoteStamp>_lastKnownUpdatedAt){
+      const remote=fbRestoreKeys((await _fbRef.once("value")).val());
+      if(remote && remote.cfg && remote.cfg.frameworks){
+        state.cfg=remote.cfg;
+        ensureAllShapes();
+        if(remote.sessions){ state.sessions=remote.sessions; migrateLegacySessions(); }
+        saveKey(KEY_CFG,state.cfg); saveKey(KEY_SEL,state.sessions);
+      }
+      _lastKnownUpdatedAt=remoteStamp; saveKey(KEY_LAST_UPDATED,_lastKnownUpdatedAt);
+      _syncedChangeSeq=_localChangeSeq; // this specific push is abandoned — it was based on stale data
+      updateSyncBadge("synced", new Date(remoteStamp).toLocaleTimeString());
+      renderBU(); renderTabs(); renderAuthBar(); renderView();
+      alert("This device had an older copy of the shared data than what's currently saved online (someone else's more recent save). The latest version has just been loaded — please check and redo the change you just made.");
+      return;
+    }
     const payload={
       cfg:state.cfg,
-      bu:state.bu,
       sessions:state.sessions,
-      currentEmployeeId:state.currentEmployeeId,
       updatedAt:Date.now()
     };
     const seqAtPush=_localChangeSeq;
     _lastKnownUpdatedAt=payload.updatedAt; // set before the write so our own echo is recognized and skipped
+    saveKey(KEY_LAST_UPDATED,_lastKnownUpdatedAt);
     await _fbRef.set(fbSanitizeKeys(payload));
     _syncedChangeSeq=seqAtPush;
     updateSyncBadge("synced", new Date(payload.updatedAt).toLocaleTimeString());
@@ -401,21 +464,42 @@ function esc(s){ return (s==null?"":String(s)).replace(/&/g,"&amp;").replace(/</
 // themselves under Admin → Definitions & Weights (per business unit); once they do, it's saved as
 // that unit's own definition the same way every other definition edit auto-saves.
 const BLANK_BY_DEFAULT_SUBS=[{sec:"A",sub:"prof"},{sec:"A",sub:"jobreq"}];
-function cloneFramework(){
+// Recovered weight scores (Sept 2026, from the admin's own records after the data-loss incident —
+// see the stale-write guard in pushToCloud()) for the business units already in use, keyed by
+// sub-section id. cloneFramework(bu) uses these as this UNIT's own "default" — not a generic uniform
+// split — so a reset, a fallback (missing framework entry), or a brand-new device that hasn't synced
+// yet all land on the real numbers for these units instead of a blank 100/26-way split.
+// SKILLS-PM and COOP are flagged: transcribed from a screenshot and don't sum to exactly 100 (102 and
+// 104 respectively) — treat those two units' numbers as provisional until re-confirmed against source.
+const KNOWN_UNIT_WEIGHTS={
+  "SKILLS-TVET":{edu:10,exp:8,prof:5,jobreq:7,plan:5,solve:5,lead:2,innov:2,comm:3,cust:5,biz:3,scope:5,impact:3,cmplx:2,rev:3,prod:3,goals:2,fin:3,hr:2,proc:2,auth:3,chal:3,pres:3,cond:4,safe:4,comp:3},
+  "SKILLS-DIPLOMA":{edu:10,exp:8,prof:5,jobreq:7,plan:5,solve:5,lead:2,innov:2,comm:3,cust:5,biz:3,scope:5,impact:3,cmplx:2,rev:3,prod:3,goals:2,fin:3,hr:2,proc:2,auth:3,chal:3,pres:3,cond:4,safe:4,comp:3},
+  "SKILLS-KM":{edu:8,exp:8,prof:6,jobreq:8,plan:4,solve:6,lead:4,innov:4,comm:4,cust:3,biz:5,scope:2,impact:3,cmplx:2,rev:1,prod:1,goals:3,fin:1,hr:3,proc:4,auth:2,chal:4,pres:3,cond:1,safe:4,comp:6},
+  "SKILLS-PM":{edu:8,exp:9,prof:4,jobreq:9,plan:5,solve:6,lead:4,innov:4,comm:4,cust:4,biz:4,scope:2,impact:3,cmplx:3,rev:1,prod:2,goals:2,fin:2,hr:2,proc:3,auth:3,chal:4,pres:3,cond:3,safe:4,comp:4},
+  "SKILLS-SHS":{edu:10,exp:5,prof:5,jobreq:10,plan:3,solve:3,lead:3,innov:3,comm:3,cust:3,biz:2,scope:2,impact:3,cmplx:4,rev:3,prod:2,goals:2,fin:2,hr:4,proc:3,auth:2,chal:2,pres:2,cond:4,safe:10,comp:5},
+  "COOP":{edu:5,exp:5,prof:5,jobreq:5,plan:2,solve:2,lead:5,innov:2,comm:5,cust:8,biz:4,scope:2,impact:10,cmplx:2,rev:5,prod:5,goals:2,fin:3,hr:4,proc:3,auth:2,chal:4,pres:2,cond:2,safe:2,comp:8},
+  "PSI":{edu:8,exp:6,prof:3,jobreq:3,plan:5,solve:6,lead:4,innov:4,comm:5,cust:6,biz:3,scope:3,impact:3,cmplx:3,rev:3,prod:3,goals:3,fin:3,hr:3,proc:3,auth:3,chal:3,pres:3,cond:3,safe:3,comp:5},
+  "SEAMAN":{edu:3,exp:3,prof:3,jobreq:5,plan:5,solve:10,lead:10,innov:5,comm:3,cust:3,biz:3,scope:3,impact:3,cmplx:3,rev:3,prod:3,goals:3,fin:3,hr:3,proc:3,auth:3,chal:3,pres:3,cond:3,safe:3,comp:5},
+  "PSEFI":{edu:5,exp:5,prof:5,jobreq:5,plan:6,solve:4,lead:4,innov:4,comm:4,cust:5,biz:3,scope:2,impact:4,cmplx:2,rev:2,prod:2,goals:4,fin:3,hr:2,proc:4,auth:4,chal:6,pres:6,cond:2,safe:2,comp:5},
+};
+const KNOWN_UNIT_ROLE_EXPECTATIONS={"SKILLS-TVET":{"1":"a. Junior Trainer I - Assist in delivering learning sessions and prepare training/teaching materials, tools, equipment, and learning resources.\nb. Certification & Documentation Sepcialist I - Process learner records and prepare training, assessment, certification, and academic documents.\nc. Projects and Grants Assistant (PAGA) I - Project development, implementation, monitoring, and evaluation (PDIME).","2":"a. Junior Trainer II - Support learning delivery and monitor learner progress in classroom, laboratory, or workshop activities.\nb. Certification & Documentation Sepcialist II - Coordinate learner registration, scheduling, and document processing.\nc. PAGA II - PDIME.","3":"a. Junior Trainer III - Deliver assigned learning modules and conduct learner assessment and performance documentation.\nb. Certification & Documentation Sepcialist III - Manage learner records and ensure compliance with training, assessment, and academic requirements.\nc. PAGA III - PDIME.","4":"a. Trainer I - Deliver competency-based or academic instruction and mentor junior trainers/instructors.\nb. Certification & Documentation Officer I - Administer training, assessment, certification, and academic support services.\nc. PAG Generalist I - PDIME; Donor engagement.","5":"a. Trainer II - Develop learning resources, mentor junior trainers/instructors, and improve instructional delivery.\nb. Certification & Documentation Officer II - Coordinate scholarships, certification, registrar services, and compliance activities.\nc. PAG Generalist II - PDIME; Donor engagement.","6":"a. Trainer III - Lead curriculum development, instructional quality, and trainer/faculty capability development.\nb. Certification & Documentation Officer III - Lead training administration, assessment services, process improvement, and quality assurance.\nc. PAG Generalist III - PDIME; Donor engagement.","7":"a. Senior Trainer I - Supervise daily learning operations and provide technical and instructional leadership to trainers/instructors.\nb. Lead Certification & Documentation Officer I - Supervise daily training, assessment, certification, and registrar operations.\nc. Project Grant Management Ofiicer I - PDIME supervision; Donor engagement; Resource mobilization.","8":"a. Senior Trainer II - Manage multiple programs, faculty/trainers, resources, and operational performance.\nb. Lead Certification & Documentation Officer II - Manage operations, staff, records, compliance, and service performance.\nc. Project Grant Management Ofiicer II - PDIME supervision; Donor engagement; Resource mobilization.","9":"a. Senior Trainer III - Lead program operations, curriculum development, strategic initiatives, and continuous improvement.\nb. Lead Certification & Documentation Officer III - Lead department operations, quality management, compliance, and continuous improvement.\nc. Project Grant Management Ofiicer III - PDIME supervision; Donor engagement; Resource mobilization.","10":"a. TVET Asst. Supervisor - Assist in managing operations, budgets, staffing, and compliance.\nb. TVET Asst. Supervisor - Assist in managing TVET programs, staff, budgets, and compliance.\nc. Project Management Asst. Supervisor - PDIME supervision; Donor engagement; Resource mobilization; Stakeholder relationship management.","11":"a. TVET Supervisor - Manage daily operations and supervise staff performance and quality standards.\nb. TVET Supervisor - Supervise department operations, performance, and quality standards.\nc. Project Management Supervisor - PDIME supervision; Donor engagement; Resource mobilization; Stakeholder relationship management.","12":"a. TVET Sr. Supervisor - Lead multiple programs, strategic partnerships, resource planning, and operational excellence.\nb. TVET Sr. Supervisor - Lead section operations, partnerships, and program performance.\nc. Project Management Senior Supervisor - PDIME supervision; Donor engagement; Resource mobilization; Stakeholder relationship management.","13":"a. TVET Asst. Manager - Lead departmental operations, workforce planning, budgets, and program performance.\nb. TVET Asst. Manager - Develop department strategy and oversee all TVET programs.\nc. Corporate Foundation (CorF) Asst. Manager - Overall supervision of key areas of NGO leadership:; 1. Commitment to mission; 2. Projects / Programs management; 3. Administrative management; 4. Networking and Communicztions; 5. Strategic management and governance.","14":"a. TVET Manager - Drive cross-functional TVET initiatives, institutional performance, innovation, and organizational growth.\nb. TVET Manager - Lead organization-wide TVET operations and strategic initiatives.\nc. CorF Manager - Overall supervision of key areas of NGO leadership:; 1. Commitment to mission; 2. Projects / Programs management; 3. Administrative management; 4. Networking and Communicztions; 5. Strategic management and governance.","15":"a. TVET Director - Set organizational TVET strategy and provide executive leadership.\nb. TVET Director - Set organizational TVET strategy and provide executive leadership.\nc. CorF Director - Overall supervision of key areas of NGO leadership:; 1. Commitment to mission; 2. Projects / Programs management; 3. Administrative management; 4. Networking and Communicztions; 5. Strategic management and governance."},"SKILLS-DIPLOMA":{"1":"a. Junior Instructor I - Assist in delivering learning sessions and prepare training/teaching materials, tools, equipment, and learning resources.\nb. Certification & Documentation Sepcialist I - Process learner records and prepare training, assessment, certification, and academic documents.","2":"a. Junior Instructor II - Support learning delivery and monitor learner progress in classroom, laboratory, or workshop activities.\nb. Certification & Documentation Sepcialist II - Coordinate learner registration, scheduling, and document processing.","3":"a. Junior Instructor III - Deliver assigned learning modules and conduct learner assessment and performance documentation.\nb. Certification & Documentation Sepcialist III - Manage learner records and ensure compliance with training, assessment, and academic requirements.","4":"a. Instructor I - Deliver competency-based or academic instruction and mentor junior trainers/instructors.\nb. Certification & Documentation Officer I - Administer training, assessment, certification, and academic support services.","5":"a. Instructor II - Develop learning resources, mentor junior trainers/instructors, and improve instructional delivery.\nb. Certification & Documentation Officer II - Coordinate scholarships, certification, registrar services, and compliance activities.","6":"a. Instructor III - Lead curriculum development, instructional quality, and trainer/faculty capability development.\nb. Certification & Documentation Officer III - Lead training administration, assessment services, process improvement, and quality assurance.","7":"a. Senior Instructor I - Supervise daily learning operations and provide technical and instructional leadership to trainers/instructors.\nb. Lead Certification & Documentation Officer I - Supervise daily training, assessment, certification, and registrar operations.","8":"a. Senior Instructor II - Manage multiple programs, faculty/trainers, resources, and operational performance.\nb. Lead Certification & Documentation Officer II - Manage operations, staff, records, compliance, and service performance.","9":"a. Senior Instructor III - Lead program operations, curriculum development, strategic initiatives, and continuous improvement.\nb. Lead Certification & Documentation Officer III - Lead department operations, quality management, compliance, and continuous improvement.","10":"a. TVET Asst. Supervisor - Assist in managing operations, budgets, staffing, and compliance.\nb. TVET Asst. Supervisor - Assist in managing TVET programs, staff, budgets, and compliance.","11":"a. TVET Supervisor - Manage daily operations and supervise staff performance and quality standards.\nb. TVET Supervisor - Supervise department operations, performance, and quality standards.","12":"a. TVET Sr. Supervisor - Lead multiple programs, strategic partnerships, resource planning, and operational excellence.\nb. TVET Sr. Supervisor - Lead section operations, partnerships, and program performance.","13":"a. TVET Asst. Manager - Lead departmental operations, workforce planning, budgets, and program performance.\nb. TVET Asst. Manager - Develop department strategy and oversee all TVET programs.","14":"a. TVET Manager - Drive cross-functional TVET initiatives, institutional performance, innovation, and organizational growth.\nb. TVET Manager - Lead organization-wide TVET operations and strategic initiatives.","15":"a. TVET Director - Set organizational TVET strategy and provide executive leadership.\nb. TVET Director - Set organizational TVET strategy and provide executive leadership."},"PSEFI":{"1":"a. Linkages & Engagement Associate I - Recruitment and retention of trainees; Engagement with communities and partners.\nb. Projects and Grants Assistant (PAGA) I - Project development, implementation, monitoring, and evaluation (PDIME).","2":"a. Linkages & Engagement Associate II - Recruitment and retention of trainees; Engagement with communities and partners.\nb. PAGA II - PDIME.","3":"a. Linkages & Engagement Associate III - Recruitment and retention of trainees; Engagement with communities and partners.\nb. PAGA III - PDIME.","4":"a. Linkages & Engagement Generalist I - Expansion of above roles to include industry / corporate engagement.\nb. PAG Generalist I - PDIME; Donor engagement.","5":"a. Linkages & Engagement Generalist II - Expansion of above roles to include industry / corporate engagement.\nb. PAG Generalist II - PDIME; Donor engagement.","6":"a. Linkages & Engagement Generalist III - Expansion of above roles to include industry / corporate engagement.\nb. PAG Generalist III - PDIME; Donor engagement.","7":"a. Stakeholder Engagement Officer I - Stakeholder relationship management.\nb. Lead Project Management Ofiicer I - PDIME supervision; Donor engagement; Resource mobilization.","8":"a. Stakeholder Engagement Officer II - Stakeholder relationship management.\nb. Lead Project Management Ofiicer II - PDIME supervision; Donor engagement; Resource mobilization.","9":"a. Stakeholder Engagement Officer III - Stakeholder relationship management.\nb. Lead Project Management Ofiicer III - PDIME supervision; Donor engagement; Resource mobilization.","10":"a. Stakeholder Engagement Asst. Supervisor - Stakeholder relationship management; Network building; Corporate communications.\nb. Project Management Asst. Supervisor - PDIME supervision; Donor engagement; Resource mobilization; Stakeholder relationship management.","11":"a. Stakeholder Engagement Supervisor - Stakeholder relationship management; Network building; Corporate communications.\nb. Project Management Supervisor - PDIME supervision; Donor engagement; Resource mobilization; Stakeholder relationship management.","12":"a. Stakeholder Engagement Senior Supervisor - Stakeholder relationship management; Network building; Corporate communications.\nb. Project Management Senior Supervisor - PDIME supervision; Donor engagement; Resource mobilization; Stakeholder relationship management.","13":"a. CorF Asst. Manager - Overall supervision of key areas of NGO leadership:; 1. Commitment to mission; 2. Projects / Programs management; 3. Administrative management; 4. Networking and Communicztions; 5. Strategic management and governance.\nb. Corporate Foundation (CorF) Asst. Manager - Overall supervision of key areas of NGO leadership:; 1. Commitment to mission; 2. Projects / Programs management; 3. Administrative management; 4. Networking and Communicztions; 5. Strategic management and governance.","14":"a. CorF Manager - Overall supervision of key areas of NGO leadership:; 1. Commitment to mission; 2. Projects / Programs management; 3. Administrative management; 4. Networking and Communicztions; 5. Strategic management and governance.\nb. CorF Manager - Overall supervision of key areas of NGO leadership:; 1. Commitment to mission; 2. Projects / Programs management; 3. Administrative management; 4. Networking and Communicztions; 5. Strategic management and governance.","15":"a. CorF Director - Overall supervision of key areas of NGO leadership:; 1. Commitment to mission; 2. Projects / Programs management; 3. Administrative management; 4. Networking and Communicztions; 5. Strategic management and governance.\nb. CorF Director - Overall supervision of key areas of NGO leadership:; 1. Commitment to mission; 2. Projects / Programs management; 3. Administrative management; 4. Networking and Communicztions; 5. Strategic management and governance."},"SKILLS-SHS":{"1":"a. AI Associate I - Assist trainers in preparing learners, specialized technical tools, and laboratory equipment in strict compliance with DepEd and TESDA safety regulations.\nb. SAA I - Assist Student Affairs officers in preparing event venues, technical equipment, and logistical materials for student activities in compliance with safety regulations.\nc. GACA I - Assist in the orderly administration and scoring of standardized psychological and mental health tests under the supervision of a licensed counselor.\nd. RCA I - Assist users at the circulation desk with borrowing and returning books, shelving materials, and maintaining shelf order (reading shelves).\ne. ORA I - Encode routine student data into the local school database and assist in sorting, filing, and retrieving physical student records in the archives.\nf. MACA I - Assist in the logistics and setup of marketing collaterals (tarpaulins, booths, flyers) for campus tours, career bazaars, and open house events.","2":"a. AI Associate II - Support faculty by organizing required DepEd/TESDA documentations (e.g., grading sheets, training logs) and maintaining laboratory inventories.\nb. SAA II - Support the department by organizing student organization documentation (e.g., clearance forms, activity proposals, attendance logs) and maintaining student center inventories.\nc. GACA II - Support the office by encoding, organizing, and securely maintaining student cumulative records and intake data in compliance with data privacy laws.\nd. RCA II - Support technical processing by stamping, labeling, and covering new books, while updating physical and digital inventory records under supervision.\ne. ORA II - Process and release routine document requests (e.g., Certificates of Enrollment, Good Moral Certificates) and handle frontline customer service inquiries.\nf. MACA II - Support the team by organizing raw creative assets (photos, videos), updating the media inventory, and monitoring competitors' print materials.","3":"a. AI Associate III - Conduct basic instructional sessions or skills training as an assistant/sub-teacher for minor subjects or TESDA qualifications under the direct supervision of a Licensed Professional Teacher (LPT) or National Certificate (NCII and TM I) holder.\nb. SAA III - Conduct basic student orientation segments, assist in student ID processing, or facilitate routine organization renewals under the direct supervision of a senior officer.\nc. GACA III - Conduct basic, routine student intake interviews and assist in facilitating generic homeroom guidance materials under direct supervision.\nd. RCA III - Conduct basic library orientations for new students and handle routine inventory checkouts and clearance processing.\ne. ROA III - Receive, log, and perform preliminary completeness checks on incoming student admission requirements (e.g., Form 138/Report Cards, PSA Birth Certificates).\nf. MACA III - Handle frontline inquiries on social media channels using predefined scripts and log basic lead information into the inquiry tracker.","4":"a. Teacher I - Deliver primary classroom instruction (synchronous or asynchronous) for at least 3 academic subjects, maximizing standard instructional hours up to DepEd limits.\nb. GENERALIST, SAO I - Deliver frontline student services, monitor day-to-day student lounge/hub operations, and coordinate logistics for major school-wide student assemblies.\nc. GC I - Conduct regular individual and group counseling sessions for students experiencing academic, personal, or social challenges.\nd. Librarian I - Perform professional cataloging and classification of library materials using standard systems (e.g., Dewey Decimal or Library of Congress) and manage reference desk inquiries.\ne. Registrar I - Evaluate and verify the authenticity and eligibility of incoming student transfer credentials and initial academic records.\nf. MAC-CO I - Draft, design, and schedule routine social media content (graphics, short-form videos) across official school platforms to drive brand awareness.","5":"a. Teacher II - Serve as a classroom section adviser, managing student welfare and progress, while maintaining a standard full-time teaching load.\nb. GENERALIST, SAO II - Serve as an active adviser or liaison to the SCOUTING PROGRAM recognized as student organization, monitoring their progress and welfare.\nc. GC II - Deliver structured career guidance, exit interviews, and tracking programs to help senior high students transition to college, tech-voc, or immediate employment.\nd. Librarian II - Deliver structured information literacy and research skills sessions to help senior high students find peer-reviewed sources, avoid plagiarism, and use citation formats.\ne. Registrar II - Manage actual data encoding, updating, and troubleshooting within the DepEd Learner Information System (LIS) or equivalent government tracking portals.\nf. MAC-CO II - Manage the active lead-nurturing pipeline, conducting follow-up calls, emails, and school tours for prospective students and parents.","6":"a. Teacher III - Plan, coordinate, and execute the learners' annual co-curricular and extra-curricular activities alongside a localized teaching load.\nb. GENERALIST, SAO III - Plan, coordinate, and execute the annual calendar of co-curricular and extra-curricular activities (e.g., foundation days, sports fests, talent showcases).\nc. GC III - Plan and execute regular preventative mental health webinars, wellness campaigns, and psychological first-aid drives across the campus.\nd. Librarian III - Plan and execute library promotional campaigns, book fairs, and regular reading advocacy or media literacy programs across the campus.\ne. Registrar III - Draft, compile, and generate official student transcripts (Form 137 / Permanent Records) and specialized certifications for checking and signature.\nf. MAC-CO III - Write and coordinate press releases, campus newsletters, and school success stories for internal and external publication.","7":"a. Lead Teacher I - Lead the teaching team in designing curriculum maps, lesson exemplars, and learning materials across specific grade levels or subject tracks.\nb. Lead AGO I - Lead student leaders and organization officers in designing comprehensive annual development plans, leadership training modules, and student-led initiatives.\nc. Lead AGO I - Design the localized developmental guidance curriculum (including modules on self-worth, stress management, and emotional resilience) for different grade levels.\nd. Lead Librarian I - Lead the evaluation, selection, and acquisition of print books and educational materials across specific academic and Tech-Voc tracks.\ne. Lead Registrar I - Lead the periodic auditing of student academic credits, checking for discrepancies in subjects, units, or missing pre-requisites across grade levels.\nf. Lead MAC I - Lead the coordination and conceptualization of specialized recruitment campaigns targeting specific tracks (e.g., Senior High School strands both Academic and TechPro courses).","8":"a. Lead Teacher II - Plan, monitor, and audit teacher/trainer instructional outputs (e.g., table of specifications, exams) and track overall student academic performance metrics.\nb. Lead AGO II - Plan, monitor, and audit student organization financial reports, project accomplishments, and overall student engagement metrics across the campus.\nc. Lead AGO II - Lead the case management of complex behavioral or psychological student cases, coordinating closely with teachers, parents, and clinical psychologists if referrals are needed.\nd. Lead Librarian II - Curate, negotiate, and manage subscription-based electronic databases, journals, and digital e-book platforms (e.g.,PGB SIS).\ne. Lead Registrar II - Conduct the final graduation audit and evaluation for graduating tranches, ensuring all institutional and DepEd curriculum requirements are fully met.\nf. Lead MAC II - Set up, optimize, and manage paid ad campaigns (Meta Ads, Google Ads) while monitoring conversion metrics and cost-per-lead (CPL).","9":"a. Lead Teacher III - Oversee classroom teaching performance through peer observations and design professional development/remediation plans for instructional personnel.\nb. Lead AGO III - Oversee the early-intervention student discipline process, manage student dispute mediations, and design student-at-risk peer support programs.\nc. Lead AGO III - Develop and conduct capacity-building training for faculty and staff on basic student crisis detection, suicide prevention protocols, and empathetic listening.\nd. Lead Librarian III - Oversee the archiving, digitization, and preservation of institutional heritage materials and local publications ( Filipiniana collection).\ne. Lead Registrar III - Oversee data reconciliation processes for complex record discrepancies, such as student name corrections, dual LIS numbers, or disputed grades.\nf. Lead MAC III - Manage external media relations and build recruitment partnerships with feeder schools, local barangays, and corporate partners.","10":"a. Asst. SHS Supervisor - Develop and streamline standardized academic processes (e.g., enrollment workflows, grading systems) and support policy implementation.\nb. Asst. SHS Supervisor - Develop and streamline standardized student service processes (e.g., student uniform exemptions, organization accreditation workflows) and assist in handbook revisions.\nc. Asst. SHS Supervisor - Develop and streamline standardized processes for student referrals, psychological testing schedules, and strict ethical compliance frameworks.\nd. Asst. SHS Supervisor - Streamline standardized library workflows (e.g., book procurement pipelines, fines, loss penalties) and assist in updating the library manual.\ne. Asst. SHS Supervisor - Streamline and develop standardized registration workflows, document release protocols, and strict local compliance mechanisms with the Data Privacy Act (RA 10173).\nf. Asst. MAC Supervisor - Develop and streamline standardized inquiry-to-enrollment workflows, ensuring compliance with data privacy regulations (RA 10173).","11":"a. SHS Supervisor - Manage day-to-day teaching personnel issues and resolve operational conflicts across academic and non-teaching functions.\nb. SHS Supervisor - Manage day-to-day student discipline or grievance issues and resolve operational conflicts involving student groups or non-academic student concerns.\nc. SHS Supervisor - Supervise day-to-day operations of counseling personnel, oversee active crisis intervention protocols (e.g., self-harm or trauma response), and resolve department operational conflicts.\nd. SHS Supervisor - Manage day-to-day operations of library personnel, oversee the Integrated Library System (ILS) and digital catalogs, and resolve operational or user service issues.\ne. SHS Supervisor - Supervise day-to-day operations of the registration and records personnel, manage the school’s Student Information System (SIS), and resolve escalated operational conflicts.\nf. MAC Supervisor - Supervise day-to-day operations of the creative and admissions teams, audit active marketing pipelines, and resolve campaign deployment bottlenecks.","12":"a. SHS Sr. Supervisor - Ensure compliance and smooth coordination with government regulating bodies (DepEd and TESDA) for program permits, audits, and institutional recognition.\nb. SHS Sr. Supervisor - Ensure departmental compliance and coordination with regulating bodies (DepEd/TESDA/CHED) regarding student safety, anti-bullying mandates, and community out-reach permits.\nc. SHS Sr. Supervisor - Ensure strict compliance with national mandates (such as the Mental Health Act / RA 11036 and DepEd child protection policies) and handle external clinical referral networks.\nd. SHS Sr. Supervisor - Ensure strict compliance with national mandates, such as DepEd school library standards and CHED/TESDA certification requirements, for academic learning resources.\ne. SHS Sr. Supervisor - Ensure strict departmental compliance and spearhead official data submissions, reports, and clearances with regulating bodies like DepEd, TESDA, and CHED.\nf. MAC Sr. Supervisor - Ensure all promotional campaigns adhere to strict institutional brand guidelines and evaluate mid-season recruitment data against enrollment targets.","13":"a. SHS Asst. Manager - Direct the implementation of the annual school operations plan, manage departmental resource allocation, and evaluate year-end academic results.\nb. SHS Asst. Manager - Direct the implementation of the annual Student Affairs operations plan, manage the departmental budget, and evaluate year-end student engagement and feedback metrics.\nc. SHS Asst. Manager - Direct the implementation of the annual Guidance and Counseling operations plan, manage the departmental budget, and audit overall campus mental health trends.\nd. SHS Asst. Manager - Direct the implementation of the annual Library and Learning Resource operations plan, manage the departmental procurement budget, and analyze year-end usage analytics.\ne. SHS Asst. Manager - Direct the execution of the annual enrollment and registration operations plan, manage the departmental budget, and oversee enrollment statistical reporting for board review.\nf. MAC Asst. Manager - Direct the execution of the annual Integrated Marketing Communications (IMC) plan, manage the departmental budget, and report enrollment forecasts to senior leadership.","14":"a. SHS Manager - Provide strategic leadership to the senior high school division, driving curriculum innovation, institutional growth, and stakeholder engagement.\nb. SHS Manager - Provide strategic leadership to the entire Student Affairs division, driving innovation in student development, campus life enhancement, and community stakeholder relations.\nc. SHS Manager - Provide strategic leadership to the entire psychological and guidance services division, driving innovative institutional wellness programs and community stakeholder mental health initiatives.\nd. SHS Manager - Provide strategic leadership to the entire library and knowledge management division, driving innovation in digital learning environments and collaborative spaces (e.g., Makerspaces).\ne. SHS Manager - Provide strategic leadership to the entire records and data management division, driving the institutional transition toward paperless archiving and secure digital credentialing (e.g., blockchain or encrypted transcripts).\nf. MAC Manager - Provide strategic leadership to the entire marketing, public relations, and admissions division, driving market expansion, scholarship branding, and institutional positioning.","15":"a. Asst. Academic Director, SHS - Direct the entire academe-instruction organization to ensure all programs, fiscal decisions, and institutional milestones are strictly aligned with the school's Vision, Mission, and Goals (VMG).\nb. Asst. Academic Director, SHS - Direct the entire student services and affairs organization to ensure all student development programs, discipline policies, and institutional milestones are strictly aligned with the school's Vision, Mission, and Goals (VMG).\nc. Asst. Academic Director, SHS - Direct the overarching student well-being and counseling organization to ensure all psychological services, emotional support frameworks, and institutional policies are deeply rooted in the school's Vision, Mission, and Goals (VMG).\nd. Asst. Academic Director, SHS - Direct the overarching library and learning information organization to ensure all knowledge centers, digital repositories, and informational frameworks are deeply aligned with the school's Vision, Mission, and Goals (VMG).\ne. Asst. Academic Director, SHS - Direct the overarching student records and enrollment management organization to ensure all data policies, admission security protocols, and institutional milestones are deeply anchored in the school's Vision, Mission, and Goals (VMG).\nf. Asst. MAC Director - Direct the overarching marketing and corporate communications organization to ensure all promotional strategies, brand values, and public relations initiatives are deeply aligned with the school's Vision, Mission, and Goals (VMG)."},"SKILLS-KM":{"1":"a. KM Assistant I - Provides basic support in digital content preparation, file management, data organization, and administrative assistance for KM digital activities.","2":"a. KM Assistant II - Assists in creating digital materials, updating knowledge resources, preparing layouts, and supporting multimedia production activities.","3":"a. KM Assistant III - Handles basic video editing, e-poster design, digital content uploading, and maintenance of KM digital repositories.","4":"a. KM Officer I - Creates multimedia content, manages digital assets, supports communication materials, and assists in implementing KM digital initiatives.","5":"a. KM Officer II - Develops digital content, performs video editing and creative design, manages knowledge platforms, and improves digital workflows.","6":"a. KM Officer III - Leads assigned digital projects, produces high-quality multimedia outputs, and applies technology solutions to enhance KM processes.","7":"a. Lead KM Officer I - Guides digital production activities, reviews creative outputs, mentors team members, and ensures quality and timely delivery of digital projects.","8":"a. Lead KM Officer II - Oversees digital content strategies, manages complex multimedia projects, and drives improvements through technology and automation.","9":"a. Lead KM Officer III - Leads digital innovation initiatives, establishes digital standards, and manages advanced KM solutions using emerging technologies.","10":"a. Project Management Asst. Supervisor - Supervises KM and multimedia projects, ensures quality delivery of videos and communication materials, and promotes innovation through AI and digital technologies.","11":"a. Project Management Supervisor - Manages strategic KM initiatives, oversees multimedia teams, drives AI-enabled process improvements, and aligns technology initiatives with organizational goals.","12":"a. Project Management Senior Supervisor - Leads enterprise KM programs, governs multimedia and communication standards, and champions AI, automation, and digital innovation across the organization.","13":"a. Project Management Asst. Manager - Manages the Knowledge Management portfolio, oversees communication and multimedia strategies, and drives innovation through AI, automation, and emerging technologies.","14":"a. Project Management  Manager - Leads the Knowledge Management Department, sets direction for multimedia and communication services, and advances organizational innovation through AI and digital transformation.","15":"a. Project Management Director - Provides strategic leadership for Knowledge Management, multimedia, and organizational learning; drives enterprise-wide AI adoption, digital transformation, and continuous innovation."},"SKILLS-PM":{"1":"a. Admin Assistant I - Provides basic administrative support such as document filing, data encoding, records maintenance, monitoring requests, and assisting daily building administrative operations.\nb. Assistant Building Engineer I - Assists in preventive maintenance, inspection, troubleshooting, and monitoring of building equipment and engineering systems.","2":"a. Admin Assistant II - Handles routine building administration tasks, prepares reports, coordinates requests, maintains tenant and facility records, and supports operational activities.\nb. Assistant Building Engineer II - Performs technical maintenance activities, supports equipment reliability programs, coordinates repairs, and maintains engineering records.","3":"a. Admin Assistant III - Performs advanced administrative coordination, monitors compliance documents, supports tenant concerns, and assists in improving administrative processes.\nb. Assistant Building Engineer III - Handles more complex engineering tasks, conducts system assessments, supports contractors, and recommends technical improvements.","4":"a. Admin Staff I - Manages day-to-day building administrative activities including documentation, billing support, service coordination, and tenant/customer assistance.\nb. Building Engineer I - Manages daily building engineering operations including maintenance activities, equipment monitoring, and compliance with engineering standards.","5":"a. Admin Staff II - Handles multiple administrative functions, prepares operational reports, coordinates with vendors and stakeholders, and ensures timely completion of building requirements.\nb. Building Engineer II - Oversees technical operations, conducts troubleshooting, manages preventive maintenance schedules, and coordinates technical service providers.","6":"a. Admin Staff III - Leads complex administrative activities, improves workflow processes, monitors service delivery, and provides guidance to junior administrative staff.\nb. Building Engineer III - Handles advanced engineering concerns, leads technical projects, improves equipment performance, and ensures operational reliability.","7":"a. Admin Lead I - Oversees administrative operations within assigned properties, coordinates team activities, monitors compliance, and ensures efficient delivery of building support services.\nb. Senior Building Engineer I - Provides technical expertise, manages complex engineering issues, mentors junior engineers, and ensures quality maintenance execution.","8":"a. Admin Lead II - Manages administrative processes across multiple functions, coaches team members, reviews reports, and drives improvements in property administration.\nb. Senior Building Engineer II - Leads engineering initiatives, evaluates system performance, manages major repairs, and supports operational improvement projects.","9":"a. Admin Lead III - Leads administrative excellence initiatives, manages critical concerns, develops processes, and supports property management leadership decisions.\nb. Senior Building Engineer III - Acts as technical authority, develops engineering standards, manages critical systems, and provides expert recommendations.","10":"a. Admin Asst. Supervisor - Assists in supervising building administration operations, monitors team performance, ensures policy compliance, and supports service quality improvements.\nb. Building Engineering Asst. Supervisor - Supervises engineering teams, manages maintenance activities, monitors equipment performance, and ensures compliance with safety standards.","11":"a. Admin Supervisor - Supervises administrative teams, manages daily property operations, resolves escalated concerns, and ensures achievement of operational targets.\nb. Building Engineering Supervisor - Oversees multiple engineering activities, manages resources, develops team capability, and improves maintenance efficiency.","12":"a. Admin Senior Supervisor - Oversees multiple administrative functions, develops team capability, improves operational efficiency, and ensures consistent property service delivery.\nb. Building Engineering Senior Supervisor - Leads engineering operations, manages major technical initiatives, ensures reliability of building systems, and drives continuous improvement.","13":"a. Admin Asst. Manager - Leads the overall building administration function, establishes standards, manages performance, and ensures alignment with property management objectives.\nb. Property Management Asst. Manager - Supports property management operations by coordinating building administration and engineering activities, monitoring service delivery, and managing operational concerns.","14":"a. Admin Manager - Manages property administration strategies, oversees multiple properties/functions, drives operational improvements, and ensures customer satisfaction.\nb. Property Management Manager - Oversees property operations, leads cross-functional teams, manages stakeholder relationships, and ensures operational excellence across properties.","15":"a. Admin Senior Manager - Provides strategic direction for building administration operations, leads organizational improvements, manages key stakeholders, and supports business goals.\nb. Property Management Director - Provides strategic leadership for property management operations, establishes policies and standards, drives business performance, and ensures long-term asset value."},"COOP":{"1":"a. Employee Relations & Client Support Specialist I - Provides administrative support for employee concerns, client requests, deployment documentation, and coordination activities.\nb. Membership and Loans - Specilaist l - Supports the Cooperative's Credit Facility, Service Billing, and Membership operations by processing loan applications, administering payroll deduction transactions, recording loan repayments, preparing billing invoices, maintaining membership records, supporting membership recruitment and retention activities, and assisting in the conduct of the Annual General Assembly to ensure accurate, timely, and responsive service delivery.\nc. HR Specialist l - Supports the Cooperative's manpower placement function by facilitating the recruitment, screening, hiring, deployment, and post-deployment documentation of qualified member-employees while ensuring accurate records, timely staffing, and compliance with Cooperative policies, client requirements, and applicable labor regulations.","2":"a. Employee Relations & Client Support Specialist II - Handles employee inquiries, assists in client communication, prepares reports/documents, and supports deployment and MOA requirements.\nb. Membership and Loans - Specilaist ll - Facilitates the efficient delivery of Credit Facility, Service Billing, and Membership services by independently managing assigned loan transactions, coordinating payroll deductions and collections with affiliate organizations, preparing billing requirements, maintaining accurate membership information, and providing responsive support that promotes operational efficiency and member satisfaction.\nc. HR Specialist lI - Facilitates the effective delivery of manpower placement services by independently managing assigned recruitment and deployment activities, coordinating with clients and applicants, monitoring member-employee movement, and ensuring responsive workforce support that meets operational requirements and service standards.","3":"a. Employee Relations & Client Support Specialist III - Manages employee concerns, coordinates client requests, maintains employee records, and supports account servicing activities.\nb. Membership and Loans - Specilaist lll - Ensures the effective administration of Credit Facility and Service Billing processes by managing assigned loan and billing portfolios, monitoring payroll deduction collections, maintaining membership data integrity, supporting Cooperative-wide membership initiatives, analyzing operational concerns, and recommending process improvements that strengthen financial performance and member experience.\nc. HR Specialist lII - Ensures the efficient execution of manpower placement processes by managing end-to-end recruitment, deployment, and post-deployment activities, resolving operational concerns, monitoring workforce performance indicators, and recommending improvements that enhance client satisfaction and member-employee experience.","4":"a. Employee Relations & Client Generalist I - Handles employee relations cases, coordinates client requirements, supports deployment activities, and ensures timely resolution of concerns.\nb. Membership and Loans Generalist I - Administers integrated Credit Facility, Service Billing, and Membership operations by coordinating lending activities, payroll deduction administration, billing processes, membership services, and stakeholder requirements while promoting operational efficiency, compliance, and quality service delivery.\nc. HR Generalist l - Administers integrated manpower placement processes by coordinating recruitment, deployment, workforce movement, employee relations support, and client requirements while promoting operational efficiency, regulatory compliance, and consistent service delivery across assigned accounts.","5":"a. Employee Relations & Client Generalist II - Manages complex employee concerns, maintains client relationships, coordinates MOA-related activities, and monitors workforce concerns.\nb. Membership and Loans Generalist Il - Oversees assigned credit, billing, and membership portfolios by evaluating operational performance, monitoring billing accuracy and collection efficiency, coordinating with internal and external stakeholders, and implementing improvements that enhance financial sustainability and member value.\nc. HR Generalist II - Oversees manpower placement operations across assigned business units by evaluating staffing requirements, monitoring recruitment effectiveness, coordinating workforce deployment, and implementing improvements that strengthen service quality, workforce stability, and operational performance.","6":"a. Employee Relations & Client Generalist III - Leads resolution of critical employee and client concerns, manages assigned accounts, and recommends improvements to ER and client processes.\nb. Membership and Loans Generalist Ill - Integrates Credit Facility, Service Billing, and Membership functions by analyzing portfolio performance, strengthening operational controls, supporting business development initiatives, resolving complex operational concerns, and providing functional expertise that improves service standards and operational targets.\nc. HR Generalist lII - Integrates manpower placement strategies with workforce planning, employee engagement, client servicing, and process improvement initiatives by analyzing operational trends, resolving complex workforce concerns, and providing functional expertise that enhances organizational effectiveness and service excellence.","7":"a. Lead Employee Relations & Client I - Leads daily ER and client management activities, coaches team members, reviews cases, and ensures quality service delivery.\nb. Credit Facility & Service Billing Lead I - Leads the day-to-day operations of Credit Facility, Service Billing, and Membership services by coordinating team activities, monitoring loan processing and billing performance, reviewing operational outputs, coaching team members, and ensuring consistent achievement of service standards and operational targets.\nc. Human Resource Lead l - Leads the day-to-day manpower placement operations by coordinating team activities, monitoring recruitment and deployment performance, coaching team members, and ensuring the consistent achievement of operational targets, client commitments, and service standards.","8":"a. Lead Senior Employee Relations & Client II - Oversees complex employee relations matters, manages key client concerns, guides team performance, and supports process improvements.\nb. Credit Facility & Service Billing Lead Il - Supervises Credit Facility, Service Billing, and Membership operations across multiple portfolios by strengthening operational coordination, optimizing team performance, resolving escalated client and member concerns, and fostering continuous improvement that enhances financial service delivery and member satisfaction.\nc. Human Resource Lead ll - Supervises manpower placement operations across multiple accounts by strengthening workforce coordination, optimizing team performance, resolving escalated operational concerns, and fostering a culture of accountability, collaboration, and continuous improvement.","9":"a. Lead Employee Relations & Client III - Provides leadership in client account management, handles escalated concerns, develops solutions, and drives service excellence.\nb. Credit Facility & Service Billing Lead Ill - Directs Credit Facility, Service Billing, and Membership operations by leading portfolio execution strategies, strengthening stakeholder relationships, monitoring operational performance, and driving initiatives that improve portfolio quality, revenue generation, operational efficiency, and overall member value.\nc. Human Resource Lead lll - Directs manpower placement operations by leading workforce execution strategies, monitoring operational performance, strengthening client engagement, and driving initiatives that improve workforce productivity, member-employee retention, and overall service delivery.","10":"a. Employee Relations & Client Management Assistant Supervisor - Supervises team operations, monitors case handling, coordinates client requirements, and ensures completion of ER and deployment activities.\nb. Credit Facility & Service Billing Business Partner I - Partners with business units, affiliate organizations, and key stakeholders to align Credit Facility, Service Billing, and Membership strategies with business objectives by analyzing portfolio performance, strengthening client relationships, managing operational risks, and implementing data-driven solutions that improve financial performance and service excellence.\nc. Human Resource BP l - Partners with business units to align manpower placement strategies with operational objectives by analyzing workforce requirements, strengthening client relationships, monitoring workforce performance, managing operational risks, and implementing solutions that improve business performance and organizational capability.","11":"a. Employee Relations & Client Management Jr. Supervisor - Manages client accounts, supervises ER processes, oversees deployment concerns, and improves operational efficiency.\nb. Credit Facility & Service Billing Business Partner Il - Drives sustainable business performance by translating organizational goals into effective credit, billing, and membership strategies, leveraging operational and financial analytics, strengthening governance, managing strategic stakeholder relationships, and leading cross-functional initiatives that enhance portfolio growth, operational efficiency, and member satisfaction.\nc. Human Resource BP ll - Drives workforce planning and organizational performance by translating business requirements into effective manpower strategies, leveraging workforce analytics, strengthening governance, managing client partnerships, and leading cross-functional initiatives that improve operational efficiency and workforce sustainability.","12":"a. Employee Relations & Client Management Senior Supervisor - Leads multiple client accounts, manages escalated employee concerns, mentors supervisors, and implements ER and client management strategies.\nb. Credit Facility & Service Billing Business Partner Ill - Champions strategic initiatives that integrate Credit Facility, Service Billing, and Membership operations with business planning, portfolio governance, organizational development, risk management, and continuous improvement to strengthen financial sustainability, service innovation, and long-term organizational performance.\nc. Human Resource BP lll - Champions strategic workforce initiatives by integrating workforce planning, business analytics, organizational development, client relationship management, governance, and change management to enhance service excellence, organizational resilience, and long-term business performance.","13":"a. Employee Relations & Client Management Assistant Jr. Manager Supervisor - Oversees department initiatives, manages key client relationships, supports strategic planning, and ensures alignment of ER operations with business goals.\nb. Credit Facility & Service Billing Strategic Partner I - Provides strategic leadership for the Cooperative's Credit Facility, Service Billing, and Membership functions by establishing sustainable portfolio strategies, strengthening governance, enhancing stakeholder partnerships, optimizing financial and operational performance, and leading initiatives that advance member value and organizational growth.\nc. Human Resource SP l - Provides strategic leadership for the Cooperative's manpower placement function by establishing workforce strategies, strengthening organizational capability, fostering strategic client partnerships, enhancing governance, and leading initiatives that advance workforce sustainability, operational excellence, and organizational growth.","14":"a. Employee Relations & Client Management Sr. Manager - Develops client partnership strategies, leads workforce relationship programs, manages business requirements, and drives continuous improvement.\nb. Credit Facility & Service Billing Strategic Partner Il - Shapes enterprise financial service strategies by driving portfolio sustainability, expanding business opportunities, strengthening organizational capability, optimizing risk management frameworks, and fostering innovation that supports the Cooperative's long-term financial stability and competitive position.\nc. Human Resource SP lI - Shapes enterprise workforce strategies by driving organizational transformation, optimizing human capital investments, strengthening stakeholder partnerships, mitigating workforce risks, and advancing innovative people practices that support the Cooperative's long-term sustainability and competitive advantage.","15":"a. Employee Relations & Client Management Director - Defines the overall ER and client management strategy, strengthens strategic partnerships, governs workforce relations, and drives organizational growth initiatives.\nb. Credit Facility & Service Billing Strategic Partner Ill - Stewards the Cooperative's long-term Credit Facility, Service Billing, and Membership direction by influencing enterprise strategy, championing financial service innovation, cultivating strategic partnerships, strengthening governance, and ensuring sustainable growth, financial resilience, and enduring value for members and the Cooperative.\nc. Human Resource SP lll - Stewards the Cooperative's long-term workforce direction by influencing organizational strategy, championing enterprise-wide people initiatives, cultivating strategic alliances, strengthening governance and succession capability, and ensuring that human capital remains a sustainable driver of organizational excellence and member value."},"PSI":{"1":"a. Recruitment Associate I - Source applicants through job portals and other recruitment channels.\nb. Documentation & Processing Associate I - Receive, verify, organize, and file applicant documents.; Ensure documentary requirements are complete based on employer and regulatory requirements.\nc. Welfare Associate I - Assist in providing basic welfare support to deployed workers and maintain accurate welfare records.","2":"a. Recruitment Associate II - Coordinate recruitment activities and maintain applicant records.\nb. Documentation & Processing Associate II - Review documents for accuracy, authenticity, and completeness before submission.; Prepare documentary submissions to DMW, MWO, embassies, OWWA, POEA systems, and other government agencies.\nc. Welfare Associate II - Coordinate welfare concerns, monitor worker well-being, and ensure timely documentation and follow-up of cases.","3":"a. Recruitment Associate III - Manage assigned recruitment requirements and applicant processing.\nb. Documentation & Processing Associate III - Manage documentation and processing for assigned employer accounts.\nc. Welfare Associate III - Handle routine welfare cases, coordinate with employers and stakeholders, and support compliance with DMW and company welfare policies.","4":"a. Recruitment Generalist I - Handle end-to-end recruitment for assigned job orders.\nb. Documentation & Processing, Generalist I - Process applications through DMW, MWO, embassy, and other regulatory requirements.\nc. Welfare Generalist I - Manage welfare services throughout the worker lifecycle, including deployment, post-deployment, and repatriation assistance.","5":"a. Recruitment Generalist II - Coordinate with employers and internal teams to fill manpower requirements.\nb. Documentation & Processing , Generalist II - Prepare processing performance reports and compliance updates.\nc. Welfare Generalist II - Resolve welfare concerns, coordinate with internal and external stakeholders, and recommend appropriate interventions to protect worker welfare.","6":"a. Recruitment Generalist III - Manage multiple recruitment projects simultaneously.\nb. Documentation & Processing, Generalist III - Lead documentation planning for new employer accounts and deployment projects.\nc. Welfare Generalist III - Oversee complex welfare cases, ensure timely resolution, and support continuous improvement of welfare programs and processes.","7":"a. Recruitment Lead I - Lead daily recruitment activities of assigned recruiters.\nb. Documentation & Processing, Lead I - Lead the daily activities of Documentation & Processing Associates.\nc. Welfare Lead I - Lead daily welfare operations, guide team members, and ensure timely handling of worker concerns and documentation.","8":"a. Recruitment Lead II - Develop recruitment programs.; Assist in manpower planning.\nb. Documentation & Processing, Lead II - Oversee documentation and processing for multiple employer accounts.; Monitor productivity, turnaround time, and service quality.\nc. Welfare Lead II - Coordinate team activities, monitor service quality, and ensure compliance with DMW regulations and company standards.","9":"a. Recruitment Lead III - Lead strategic recruitment initiatives.; Manage employer recruitment expectations.\nb. Documentation & Processing, Lead III - Handle escalated documentation, compliance, and client concerns.\nc. Welfare Lead III - mentor the welfare team, and ensure effective case management and stakeholder coordination.","10":"a. Operation Business Asst. Supervisor - Lead and oversee recruitment operations, ensuring compliance and efficiency.; Build and sustain employer and stakeholder relationships to support deployment objectives.; Review departmental reports and monitor processing status for accuracy, timeliness, and alignment with standards.\nb. Operation Business Asst. Supervisor - Lead and oversee recruitment operations, ensuring compliance and efficiency.; Build and sustain employer and stakeholder relationships to support deployment objectives.; Review departmental reports and monitor processing status for accuracy, timeliness, and alignment with standards.\nc. Welfare Asst. Supervisor - Supervise welfare operations, monitor team performance, and ensure timely and quality delivery of welfare services.","11":"a. Operation Business Supervisor - Design and implement recruitment programs tailored to organizational needs.; Assist in manpower planning by providing data and recommendations to management.; Manage documentation operations across multiple employer accounts and deployment projects, ensuring smooth execution.\nb. Operation Business Supervisor - Design and implement recruitment programs tailored to organizational needs.; Assist in manpower planning by providing data and recommendations to management.; Manage documentation operations across multiple employer accounts and deployment projects, ensuring smooth execution.\nc. Welfare Supervisor - Manage welfare programs, oversee case resolution, and strengthen coordination with employers, MWOs, OWWA, DMW, and other stakeholders.","12":"a. Operation Business Senior Supervisor - Manage employer recruitment expectations and ensure service delivery meets agreed standards.; Prepare management reports with operational insights, recommendations, and trend analysis.; Provide data-driven operational recommendations to support leadership decision-making.\nb. Operation Business Senior Supervisor - Manage employer recruitment expectations and ensure service delivery meets agreed standards.; Prepare management reports with operational insights, recommendations, and trend analysis.; Provide data-driven operational recommendations to support leadership decision-making.\nc. Welfare Seniro Supervisor - Lead welfare operations, implement process improvements, ensure regulatory compliance, and achieve departmental performance targets.","13":"a. Operations Asst. Manager - Collaborate with Business Development, Operations, Documentation, Marketing, Recruitment, and Finance teams to align strategies.; Drive enterprise-wide deployment objectives through cross-functional coordination.; Shape long-term operational vision and contribute to strategic planning initiatives.\nb. Operations Asst. Manager - Collaborate with Business Development, Operations, Documentation, Marketing, Recruitment, and Finance teams to align strategies.; Drive enterprise-wide deployment objectives through cross-functional coordination.; hape long-term operational vision and contribute to strategic planning initiatives.\nc. Welfare Asst. Manager - Oversee the Welfare Department, ensuring effective worker protection, regulatory compliance, operational excellence, and stakeholder satisfaction.","14":"a. Operations Manager - Monitor operational KPIs and oversee service delivery performance across departments.; Coordinate with Recruitment, Documentation, Processing, and Finance to ensure operational alignment.; Support budget monitoring, manpower planning, and resource allocation to optimize efficiency.\nb. Operations Manager - Monitor operational KPIs and oversee service delivery performance across departments.; Coordinate with Recruitment, Documentation, Processing, and Finance to ensure operational alignment.; Support budget monitoring, manpower planning, and resource allocation to optimize efficiency.\nc. Welfare Manager - Manage welfare programs, develop team capabilities, improve operational processes, and ensure effective implementation of worker welfare initiative.","15":"a. Operations Senior Manager - Develop succession plans and strengthen leadership capability across departments.; Manage business continuity programs, operational risks, and compliance initiatives.; Champion operational excellence, governance, and continuous improvement at the enterprise level.\nb. Operations Senior Manager - Develop succession plans and strengthen leadership capability across departments.; Manage business continuity programs, operational risks, and compliance initiatives.; Champion operational excellence, governance, and continuous improvement at the enterprise level.\nc. Welfare Senior Manager - strengthen stakeholder partnerships, ensure compliance with DMW and international labor standards, and drive continuous improvement in worker welfare and service delivery."}};
+
+function cloneFramework(bu){
   const fw=JSON.parse(JSON.stringify(DATA.FRAMEWORK));
   // weight lives on the sub-section itself (e.g. "Education"), not on each a–e choice.
   // Across the whole framework, all sub-section weights together sum to 100.
   const totalSubs=fw.reduce((n,s)=>n+s.subs.length,0);
-  const w=100/totalSubs;
+  const known=bu&&KNOWN_UNIT_WEIGHTS[bu];
+  const w=100/totalSubs; // generic fallback for a unit with no recovered weights of its own
   fw.forEach(sec=>sec.subs.forEach(sub=>{
-    sub.weight=w;
+    sub.weight=(known&&sub.id in known)?known[sub.id]:w;
     const blank=BLANK_BY_DEFAULT_SUBS.some(x=>x.sec===sec.id&&x.sub===sub.id);
     sub.choices.forEach(c=>{ delete c.weight; if(blank) c.def=""; });
   }));
   return fw;
 }
 function defaultConfig(){ return {
-  frameworks:Object.fromEntries(DATA.DEFAULT_BUSINESS_UNITS.map(bu=>[bu,cloneFramework()])),
+  frameworks:Object.fromEntries(DATA.DEFAULT_BUSINESS_UNITS.map(bu=>[bu,cloneFramework(bu)])),
   families:JSON.parse(JSON.stringify(DATA.DEFAULT_FAMILIES)).map((f,i)=>Object.assign({},f,{profStandard:i+1})),
   base:DATA.BASE_MULTIPLIER,
   jg:JSON.parse(JSON.stringify(DATA.DEFAULT_JG)),
@@ -424,6 +508,11 @@ function defaultConfig(){ return {
   employees:[],
   competencyImportance:Object.fromEntries(DATA.DEFAULT_BUSINESS_UNITS.map(bu=>[bu,{}])),
   devPlan:{conversationalPlanner:null,trainingPrograms:{}},
+  // Per-unit lock on the Definitions & Weights panel — bu -> true/false. When a unit is locked, every
+  // sub-section weight for that unit becomes read-only (and "Reset to Defaults" for Weights is
+  // blocked) until an Admin unlocks it again, so weights an Admin has finalized can't be changed —
+  // accidentally or otherwise — without a deliberate unlock step first. Missing/false = unlocked.
+  weightsLocked:{},
   // Sign-in accounts — {id, username, passwordHash, role}. role is "Admin" (full access, including
   // this Users panel) or "Evaluator" (Evaluate/Development/Report only). Starts EMPTY on purpose: no
   // password is ever hardcoded in this file. The first person to open the tool is walked through
@@ -433,8 +522,25 @@ function defaultConfig(){ return {
 // Fills in any units missing a roleExpectations bucket — keeps old saved configs working.
 function ensureRoleExpShape(){
   if(!state.cfg.roleExpectations) state.cfg.roleExpectations={};
-  state.cfg.businessUnits.forEach(u=>{ if(!state.cfg.roleExpectations[u]) state.cfg.roleExpectations[u]={}; });
+  state.cfg.businessUnits.forEach(u=>{
+    if(!state.cfg.roleExpectations[u]) state.cfg.roleExpectations[u]={};
+    // Recovered baseline: for the units we have real position-title/key-responsibility data for,
+    // fill in only whichever job grades are still blank (missing, or an empty string) — an Admin's
+    // own saved text for a grade is never touched. This is how a wiped or fresh-loaded unit gets its
+    // real expectations back without risking overwriting something someone already customized.
+    const known=KNOWN_UNIT_ROLE_EXPECTATIONS[u];
+    if(known){
+      Object.keys(known).forEach(jg=>{
+        if(!state.cfg.roleExpectations[u][jg]) state.cfg.roleExpectations[u][jg]=known[jg];
+      });
+    }
+  });
 }
+// Backfills the weightsLocked map for old saved configs — missing entries just mean "unlocked".
+function ensureWeightsLockShape(){
+  if(!state.cfg.weightsLocked) state.cfg.weightsLocked={};
+}
+function isWeightsLocked(bu){ return !!(state.cfg.weightsLocked&&state.cfg.weightsLocked[bu||state.bu]); }
 // Fills in any units missing a competencyImportance bucket — keeps old saved configs working.
 // Shape is bu -> jobGradeFamilyId -> competencyKey -> {value,locked}, so Admin can set a different
 // Importance Rating per job grade family (e.g. Specialist JG1–JG3 vs Generalist JG4–JG6) within each
@@ -500,6 +606,7 @@ function ensureAllShapes(){
   ensureEmployeesShape();
   ensureDevPlanShape();
   ensureUsersShape();
+  ensureWeightsLockShape();
 }
 function findUserByUsername(name){
   ensureUsersShape();
@@ -509,7 +616,23 @@ function findUserByUsername(name){
 function findUserById(id){ ensureUsersShape(); return state.cfg.users.find(u=>String(u.id)===String(id))||null; }
 function adminAccountCount(){ ensureUsersShape(); return state.cfg.users.filter(u=>u.role==="Admin").length; }
 function getRoleExp(bu,jg){ return (state.cfg.roleExpectations&&state.cfg.roleExpectations[bu]&&state.cfg.roleExpectations[bu][jg])||""; }
-function setRoleExp(bu,jg,text){ ensureRoleExpShape(); state.cfg.roleExpectations[bu][jg]=text; scheduleSave(); }
+// Typing into a Role Expectations textarea only updates this in-memory draft — it's deliberately NOT
+// auto-saved on every keystroke. It only reaches localStorage/Firebase once the admin clicks the
+// explicit "Save Role Expectations" button (saveRoleExpectations() below), so a save always reflects
+// a moment the admin actually chose, rather than whatever happened to be typed when a debounce fired.
+function setRoleExp(bu,jg,text){ ensureRoleExpShape(); state.cfg.roleExpectations[bu][jg]=text; roleExpDirty=true; updateRoleExpSaveIndicator(); }
+function saveRoleExpectations(){
+  if(!roleExpDirty) return;
+  scheduleSave();
+  roleExpDirty=false;
+  updateRoleExpSaveIndicator();
+}
+function updateRoleExpSaveIndicator(){
+  const btn=document.getElementById("saveRoleExpBtn"), ind=document.getElementById("roleExpDirtyNote");
+  if(btn) btn.disabled=!roleExpDirty;
+  if(ind) ind.textContent=roleExpDirty?"Unsaved changes":"All changes saved";
+  if(ind) ind.style.color=roleExpDirty?"var(--warn)":"var(--faint)";
+}
 function defaultSelections(fw){ return {}; }
 // Keeps old saved configs working — backfills a proficiency standard (1–5) for any family missing one.
 function ensureFamilyProfStandards(){
@@ -544,6 +667,7 @@ let openSecs = {};
 let adminPanel = "weights";
 let adminOpenSec = null;
 let adminRoleExpUnit = null; // which department's role expectations the admin panel is editing
+let roleExpDirty = false; // true once typed text hasn't been committed via the explicit Save button yet
 let adminEditingEmployeeId = null; // employee._id currently being edited in the manual employee form (null = adding new)
 function emptyEmployeeForm(){ return {lastName:"",firstName:"",middleName:"",position:"",jobGrade:"",department:""}; }
 let adminEmployeeForm = emptyEmployeeForm();
@@ -585,6 +709,7 @@ async function attemptFirstAdminSetup(){
   authUser={id:rec.id, username:rec.username, role:rec.role};
   try{ localStorage.setItem(KEY_SESSION, JSON.stringify({id:rec.id})); }catch(e){}
   setupForm={username:"",password:"",confirm:""};
+  await loadNavStateForAccount(); // brand-new account: no stored nav state yet, so this just applies the defaults
   renderTabs(); renderAuthBar(); renderView();
 }
 async function attemptLogin(){
@@ -598,12 +723,14 @@ async function attemptLogin(){
   authUser={id:rec.id, username:rec.username, role:rec.role};
   try{ localStorage.setItem(KEY_SESSION, JSON.stringify({id:rec.id})); }catch(e){}
   loginForm={username:"",password:""};
+  await loadNavStateForAccount(); // resume wherever THIS account last left off on this device
   renderTabs(); renderAuthBar(); renderView();
 }
-function doLogout(){
+async function doLogout(){
   authUser=null;
   try{ localStorage.removeItem(KEY_SESSION); }catch(e){}
   state.tab="evaluate";
+  await loadNavStateForAccount(); // switch to the signed-out bucket's nav state (defaults, normally)
   renderTabs(); renderAuthBar(); renderView();
 }
 // ---- Admin → Users & Access: add/edit/remove accounts (Admin-only; each check below is defense in
@@ -663,7 +790,7 @@ function adminDeleteUser(userId){
 }
 
 /* ---------- derived ---------- */
-const framework = ()=> state.cfg.frameworks[state.bu] || cloneFramework();
+const framework = ()=> state.cfg.frameworks[state.bu] || cloneFramework(state.bu);
 function familyMultipliers(){ let cum=1; return state.cfg.families.map(f=>{ cum*=f.factor; return Object.assign({},f,{mult:state.cfg.base*cum}); }); }
 // The assessment session (job factor selections, evidence, GWC, Competency Gap ratings — every
 // piece of a single evaluation) is keyed by WHICH EMPLOYEE is currently selected, not by business
@@ -770,7 +897,7 @@ function setSync(s){ const el=document.getElementById("sync"); if(!el)return;
 function scheduleSave(){
   markLocalChange(); // flags this edit as "not yet pushed" so an in-flight cloud pull can't clobber it
   setSync("saving"); clearTimeout(saveTimer); saveTimer=setTimeout(async()=>{
-    await Promise.all([saveKey(KEY_CFG,state.cfg),saveKey(KEY_BU,state.bu),saveKey(KEY_SEL,state.sessions),saveKey(KEY_CUR_EMP,state.currentEmployeeId)]);
+    await Promise.all([saveKey(KEY_CFG,state.cfg),saveKey(keyBU(),state.bu),saveKey(KEY_SEL,state.sessions),saveKey(keyCurEmp(),state.currentEmployeeId)]);
     setSync("synced"); setTimeout(()=>setSync("idle"),1500);
   },400);
   schedulePush(); // separately debounced push to Firebase, so every device sees this edit
@@ -1085,7 +1212,7 @@ function deleteTrainingProgramManual(compKey,famId,idx){
   renderView();
 }
 function resetLevels(){ patchSession({selections:defaultSelections(framework())}); }
-function editFramework(updater){ const fw=state.cfg.frameworks[state.bu]||cloneFramework(); updater(fw); state.cfg.frameworks[state.bu]=fw; scheduleSave(); }
+function editFramework(updater){ const fw=state.cfg.frameworks[state.bu]||cloneFramework(state.bu); updater(fw); state.cfg.frameworks[state.bu]=fw; scheduleSave(); }
 
 /* ================= RENDER ================= */
 function renderTabs(){
@@ -1100,7 +1227,7 @@ function renderTabs(){
 function renderBU(){
   const sel=document.getElementById("bu");
   sel.innerHTML=state.cfg.businessUnits.map(u=>`<option ${u===state.bu?"selected":""}>${esc(u)}</option>`).join("");
-  sel.onchange=()=>{ state.bu=sel.value; if(!state.cfg.frameworks[state.bu])state.cfg.frameworks[state.bu]=cloneFramework(); state.currentEmployeeId=""; ensureSession(); scheduleSave(); renderView(); };
+  sel.onchange=()=>{ state.bu=sel.value; if(!state.cfg.frameworks[state.bu])state.cfg.frameworks[state.bu]=cloneFramework(state.bu); state.currentEmployeeId=""; ensureSession(); scheduleSave(); renderView(); };
 }
 function renderAuthBar(){
   const el=document.getElementById("authbar");
@@ -1752,7 +1879,7 @@ function reportDevBlock(){
 // Expectations, Competency Importance, Development Plan and Employees are pure admin-entered data
 // with no "default" to revert to, and each already has its own dedicated per-item clear control.
 const RESETTABLE_PANELS={
-  weights:{label:"Definitions & Weights",detail:()=>`the level definitions and section weights for the current unit ("${state.bu}") only — other units keep their own`},
+  weights:{label:"Definitions & Weights",detail:()=>`the level definitions and section weights for the current unit ("${state.bu}") only — other units keep their own. ${KNOWN_UNIT_WEIGHTS[state.bu]?"This unit has a recorded baseline, so this restores those recovered weights, not a blank even split":"This unit has no recorded baseline on file, so this restores a blank even split across all sub-sections"}`},
   mult:{label:"Family Multipliers",detail:()=>"the job family list, factors and base multiplier (this applies across every unit)"},
   bands:{label:"Grade Bands",detail:()=>"the Job Grade → score band → family table (this applies across every unit)"},
   units:{label:"Business Units",detail:()=>"the list of business units — this will NOT delete any unit's saved Definitions & Weights, Role Expectations, Competency Importance, or other data"}
@@ -1760,7 +1887,8 @@ const RESETTABLE_PANELS={
 function resetAdminPanelToDefault(panel){
   const fresh=defaultConfig();
   if(panel==="weights"){
-    state.cfg.frameworks[state.bu]=cloneFramework();
+    if(isWeightsLocked()) return; // defense in depth — the UI already blocks this before confirm()
+    state.cfg.frameworks[state.bu]=cloneFramework(state.bu);
   } else if(panel==="mult"){
     state.cfg.families=fresh.families;
     state.cfg.base=fresh.base;
@@ -1770,7 +1898,7 @@ function resetAdminPanelToDefault(panel){
     ensureJGShape();
   } else if(panel==="units"){
     state.cfg.businessUnits=[...fresh.businessUnits];
-    state.cfg.businessUnits.forEach(u=>{ if(!state.cfg.frameworks[u]) state.cfg.frameworks[u]=cloneFramework(); });
+    state.cfg.businessUnits.forEach(u=>{ if(!state.cfg.frameworks[u]) state.cfg.frameworks[u]=cloneFramework(u); });
     ensureRoleExpShape(); ensureImportanceShape();
     if(!state.cfg.businessUnits.includes(state.bu)){ state.bu=state.cfg.businessUnits[0]; state.currentEmployeeId=""; ensureSession(); }
   } else { return; }
@@ -1815,11 +1943,91 @@ function refreshWtBanner(){
   el.querySelector("span").style.fontWeight=allOk?"700":"400";
   el.querySelector("span").textContent=html;
 }
+// ---- Bulk weights export/import (ALL units at once) ------------------------------------------
+// One row per sub-section, one column per business unit — the same shape as a printed weights
+// table, so a full set of weights can be reviewed and corrected in Excel (much easier to spot-check
+// than a screenshot) and brought in for every unit in a single action, rather than retyping 26
+// numbers per unit, nine times over, through the UI.
+function exportAllWeights(){
+  if(typeof XLSX==="undefined"){ alert("Excel export isn't available right now — check your connection and try again."); return; }
+  const units=state.cfg.businessUnits;
+  const base=state.cfg.frameworks[units[0]]||cloneFramework(units[0]);
+  const rows=[];
+  base.forEach(sec=>sec.subs.forEach(sub=>{
+    const row={"Section":sec.name,"Sub-section":sub.name};
+    units.forEach(u=>{
+      const fw=state.cfg.frameworks[u]||[];
+      const s=fw.find(x=>x.id===sec.id); const su=s&&s.subs.find(x=>x.id===sub.id);
+      row[u]=su?Math.round((Number(su.weight)||0)*100)/100:"";
+    });
+    rows.push(row);
+  }));
+  const ws=XLSX.utils.json_to_sheet(rows);
+  ws["!cols"]=[{wch:24},{wch:32},...units.map(()=>({wch:14}))];
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,"Weights");
+  XLSX.writeFile(wb,`role-profiler-weights-all-units-${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+// Matches an imported row to a sub-section by name, tolerant of the small label differences that
+// exist between how a name might be typed/pasted and this framework's own copy (case, punctuation,
+// "&" vs "and", trailing "s", extra spaces) — matching by exact id isn't possible from a human-typed
+// spreadsheet, so this is the safety net that keeps a slightly-different label from silently landing
+// on the wrong sub-section (or being skipped) during import.
+function normSubName(s){ return String(s||"").toLowerCase().replace(/&/g,"and").replace(/[^a-z0-9]+/g," ").replace(/\s+/g," ").trim().replace(/s\b/g,""); }
+function importAllWeights(file){
+  if(typeof XLSX==="undefined"){ alert("Excel import isn't available right now — check your connection and try again."); return; }
+  const reader=new FileReader();
+  reader.onload=()=>{
+    let wb;
+    try{ wb=XLSX.read(reader.result,{type:"array"}); }catch(e){ alert("Couldn't read that file — make sure it's a Weights export/template (.xlsx)."); return; }
+    const sheetName=wb.SheetNames.find(n=>/weight/i.test(n))||wb.SheetNames[0];
+    const ws=wb.Sheets[sheetName];
+    if(!ws){ alert("Couldn't read that file."); return; }
+    const rows=XLSX.utils.sheet_to_json(ws,{defval:""});
+    if(!rows.length){ alert("That file doesn't contain any rows."); return; }
+    const subCol=Object.keys(rows[0]).find(k=>/sub[\s-]*section/i.test(k))||Object.keys(rows[0])[1];
+    const unitCols=Object.keys(rows[0]).filter(k=>state.cfg.businessUnits.includes(k));
+    if(!subCol||!unitCols.length){ alert("That file doesn't have a recognizable \"Sub-section\" column and/or any column matching one of this tool's business unit names."); return; }
+    const lockedSkipped=unitCols.filter(u=>isWeightsLocked(u));
+    const targetUnits=unitCols.filter(u=>!isWeightsLocked(u));
+    if(!targetUnits.length){ alert("Every matching unit column in that file is locked — unlock the unit(s) first (Admin → Definitions & Weights) before importing."); return; }
+    // Build a name -> {sec,sub} lookup once per target unit's own framework (each unit's framework
+    // is its own array/object, even though the sub-section names are the same across units).
+    let matched=0, unmatched=[];
+    const preview=[];
+    rows.forEach(row=>{
+      const label=row[subCol]; const norm=normSubName(label);
+      if(!norm) return;
+      targetUnits.forEach(u=>{
+        if(!(u in row) || row[u]==="" || row[u]==null) return;
+        const fw=state.cfg.frameworks[u]||(state.cfg.frameworks[u]=cloneFramework(u));
+        let hit=null;
+        fw.forEach(sec=>sec.subs.forEach(sub=>{ if(normSubName(sub.name)===norm) hit={sec,sub}; }));
+        if(hit){ preview.push({u,hit,value:Number(row[u])||0}); }
+        else if(!unmatched.includes(label)) unmatched.push(label);
+      });
+    });
+    if(!preview.length){ alert("Couldn't match any rows in that file to this framework's sub-sections — check the \"Sub-section\" column's wording against the exported template."); return; }
+    let msg=`Import weights for ${targetUnits.length} unit(s) (${targetUnits.join(", ")}), covering ${preview.length} value(s)?\n\nThis overwrites the existing weight for each matched sub-section in each matched unit — nothing else (definitions, other units' data) is touched.`;
+    if(unmatched.length) msg+=`\n\n${unmatched.length} row label(s) didn't match a known sub-section and will be skipped: ${unmatched.slice(0,5).join("; ")}${unmatched.length>5?"…":""}`;
+    if(lockedSkipped.length) msg+=`\n\n${lockedSkipped.length} unit(s) are locked and will be skipped entirely: ${lockedSkipped.join(", ")}`;
+    if(!confirm(msg)) return;
+    preview.forEach(({hit,value})=>{ hit.sub.weight=value; });
+    matched=preview.length;
+    scheduleSave();
+    renderView();
+    alert(`Imported ${matched} weight value(s) across ${targetUnits.length} unit(s).`);
+  };
+  reader.onerror=()=>alert("Couldn't read that file.");
+  reader.readAsArrayBuffer(file);
+}
 function adminWeights(){
+  ensureWeightsLockShape();
   const mults=familyMultipliers();
   const fw=framework();
   const {allOk,html:bannerText}=wtBannerHTML(fw);
   const totalSubs=fw.reduce((n,sec)=>n+sec.subs.length,0);
+  const locked=isWeightsLocked();
   const secs=fw.map(sec=>{
     const on=adminOpenSec===sec.id;
     const body=on?`<div style="border-top:1px solid var(--lineSoft)">${sec.subs.map(sub=>`
@@ -1827,7 +2035,7 @@ function adminWeights(){
         <div class="row" style="gap:8px;margin-bottom:8px">
           <span style="font-size:13.5px;font-weight:650;flex:1">${esc(sub.name)}</span>
           <span style="font-size:10.5px;color:var(--faint)">weight</span>
-          <input type="number" step="0.01" data-wt="${sec.id}|${sub.id}" value="${Math.round((Number(sub.weight)||0)*100)/100}" class="tnum" style="width:70px;font-size:12.5px;padding:5px 6px;text-align:right;border:1px solid var(--line);border-radius:7px"/>
+          <input type="number" step="0.01" data-wt="${sec.id}|${sub.id}" value="${Math.round((Number(sub.weight)||0)*100)/100}" class="tnum" ${locked?"disabled":""} style="width:70px;font-size:12.5px;padding:5px 6px;text-align:right;border:1px solid var(--line);border-radius:7px;${locked?"opacity:.55;cursor:not-allowed":""}"/>
         </div>
         ${sub.choices.map(c=>{const fi=cIndex(c.id);return `<div class="row" style="align-items:flex-start;gap:8px;margin-bottom:8px">
           <span class="tnum" title="×${mults[fi].mult}" style="flex:0 0 auto;width:22px;height:22px;border-radius:5px;font-size:11px;font-weight:700;background:${FAM[fi]};color:#fff;display:flex;align-items:center;justify-content:center;margin-top:4px">${c.id.toUpperCase()}</span>
@@ -1846,12 +2054,25 @@ function adminWeights(){
   return `<div class="row" style="gap:8px;margin-bottom:12px;background:var(--ink);border-radius:10px;color:#fff;padding:10px 16px">
       <span>🏢</span><span style="font-size:12.5px">Editing definitions &amp; weights for</span><span style="font-size:13px;font-weight:700">${esc(state.bu)}</span>
       <span style="font-size:11.5px;color:#B9C6C0;margin-left:auto">Each unit keeps its own set</span></div>
+    <div class="row" style="gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      <button id="expAllWt" class="btn btn-ghost" style="display:flex;align-items:center;gap:6px;padding:7px 12px;font-size:12.5px">⭳ Export ALL units' weights (.xlsx)</button>
+      <button id="impAllWt" class="btn btn-ghost" style="display:flex;align-items:center;gap:6px;padding:7px 12px;font-size:12.5px">⭱ Import weights (.xlsx)</button>
+      <input id="impAllWtFile" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none"/>
+      <span style="font-size:11.5px;color:var(--faint)">One file, every business unit as a column — set or fix every unit's weights in one import instead of one field at a time.</span>
+    </div>
     <div style="margin-bottom:16px;background:var(--accentSoft);border:1px solid var(--line);border-radius:10px;padding:12px 16px;font-size:12.5px;line-height:1.5">
       <b>How scoring works.</b> Each sub-section (e.g. Education, Work Experience) has one <b>weight</b> — the individual a–e choices don't carry their own weight. Across all ${totalSubs} sub-sections in the framework, weights sum to <b>100</b>. The level chosen also sets a multiplier — a ×10, b ×20, c ×40, d ×80, e ×160. A selected level scores <b>the sub-section's weight × its multiplier</b>; the totals sum to the score.
     </div>
     <div id="wtbanner" style="margin-bottom:16px;background:${allOk?"var(--accentSoft)":"var(--warnSoft)"};border:1px solid ${allOk?"var(--accent)":"var(--line)"};border-radius:10px;padding:12px 16px">
       <span style="font-size:12.5px;font-weight:${allOk?700:400};color:${allOk?"var(--accent)":"var(--warn)"}">${bannerText}</span>
-    </div>${secs}`;
+    </div>${secs}
+    <div class="card" style="margin-top:16px;padding:14px 16px;display:flex;align-items:center;gap:12px;background:${locked?"var(--warnSoft)":"var(--card)"}">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:650">
+        <input type="checkbox" id="lockWeightsChk" ${locked?"checked":""} style="width:16px;height:16px"/>
+        🔒 Lock all ${totalSubs} sub-section weights for ${esc(state.bu)}
+      </label>
+      <span style="font-size:11.5px;color:var(--faint);margin-left:auto">${locked?"Locked — weights and \"Reset to Defaults\" are blocked until unlocked. Other units are unaffected.":"When locked, nobody (including Admins) can change this unit's weights or reset them to default until it's unlocked again."}</span>
+    </div>`;
 }
 function adminMult(){
   const mults=familyMultipliers();
@@ -1914,7 +2135,12 @@ function adminRoleExpectations(){
       <input id="impRoleExpFile" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none"/>
       <span style="font-size:11.5px;color:var(--faint)">Export a unit's role expectations as an Excel file, then import it into this or another unit.</span>
     </div>
-    ${rows}`;
+    ${rows}
+    <div class="card" style="position:sticky;bottom:12px;margin-top:16px;padding:12px 16px;display:flex;align-items:center;gap:12px;box-shadow:0 2px 10px rgba(0,0,0,.08)">
+      <button id="saveRoleExpBtn" class="btn btn-primary" style="padding:9px 16px;font-size:13px" ${roleExpDirty?"":"disabled"}>💾 Save Role Expectations</button>
+      <span id="roleExpDirtyNote" style="font-size:12px;color:${roleExpDirty?"var(--warn)":"var(--faint)"};font-weight:${roleExpDirty?700:400}">${roleExpDirty?"Unsaved changes":"All changes saved"}</span>
+      <span style="font-size:11.5px;color:var(--faint);margin-left:auto">Typing here doesn't save automatically — click Save (or it's saved with any other admin edit) to sync it for everyone.</span>
+    </div>`;
 }
 function exportRoleExpectations(){
   ensureRoleExpShape();
@@ -1970,6 +2196,7 @@ function importRoleExpectations(file){
     const existing=state.cfg.roleExpectations[unit]||{};
     Object.keys(grades).forEach(jg=>{ existing[jg]=String(grades[jg]??""); });
     state.cfg.roleExpectations[unit]=existing;
+    roleExpDirty=false; // this action saves immediately (it's already confirm-gated), unlike typing
     scheduleSave();
     renderView();
   };
@@ -2214,6 +2441,7 @@ function wireAdmin(){
   const rc=document.getElementById("resetcfg"); if(rc)rc.onclick=()=>{
     const info=RESETTABLE_PANELS[adminPanel];
     if(!info) return;
+    if(adminPanel==="weights" && isWeightsLocked()){ alert(`Weights for "${state.bu}" are locked. Unlock them (checkbox at the bottom of this panel) before resetting.`); return; }
     if(confirm(`Reset ${info.label} to defaults?\n\nThis resets ${info.detail()}.\n\nNothing else on this Admin tab — no other module, business unit, or saved data — is affected.`)){
       resetAdminPanelToDefault(adminPanel);
     }
@@ -2221,7 +2449,17 @@ function wireAdmin(){
   // weights
   document.querySelectorAll("#view [data-asec]").forEach(b=>b.onclick=()=>{ const id=b.dataset.asec; adminOpenSec=adminOpenSec===id?null:id; renderView(); });
   document.querySelectorAll("#view [data-def]").forEach(t=>t.oninput=()=>{ const [s,su,c]=t.dataset.def.split("|"); editFramework(fw=>{ fw.find(x=>x.id===s).subs.find(x=>x.id===su).choices.find(x=>x.id===c).def=t.value; }); });
-  document.querySelectorAll("#view [data-wt]").forEach(t=>t.oninput=()=>{ const [s,su]=t.dataset.wt.split("|"); editFramework(fw=>{ fw.find(x=>x.id===s).subs.find(x=>x.id===su).weight=parseFloat(t.value)||0; }); refreshWtBanner(); });
+  document.querySelectorAll("#view [data-wt]").forEach(t=>t.oninput=()=>{ if(isWeightsLocked())return; const [s,su]=t.dataset.wt.split("|"); editFramework(fw=>{ fw.find(x=>x.id===s).subs.find(x=>x.id===su).weight=parseFloat(t.value)||0; }); refreshWtBanner(); });
+  const lockChk=document.getElementById("lockWeightsChk"); if(lockChk)lockChk.onchange=()=>{
+    ensureWeightsLockShape();
+    state.cfg.weightsLocked[state.bu]=lockChk.checked;
+    scheduleSave();
+    renderView();
+  };
+  const expAllWtBtn=document.getElementById("expAllWt"); if(expAllWtBtn)expAllWtBtn.onclick=exportAllWeights;
+  const impAllWtBtn=document.getElementById("impAllWt"), impAllWtFile=document.getElementById("impAllWtFile");
+  if(impAllWtBtn&&impAllWtFile)impAllWtBtn.onclick=()=>impAllWtFile.click();
+  if(impAllWtFile)impAllWtFile.onchange=()=>{ if(impAllWtFile.files&&impAllWtFile.files[0]) importAllWeights(impAllWtFile.files[0]); impAllWtFile.value=""; };
   // multipliers
   const baseInp=document.querySelector("#view [data-base]"); if(baseInp)baseInp.oninput=()=>{ state.cfg.base=parseFloat(baseInp.value)||0; scheduleSave(); updateMultLabels(); };
   document.querySelectorAll("#view [data-fname]").forEach(inp=>inp.oninput=()=>{ state.cfg.families[+inp.dataset.fname].name=inp.value; scheduleSave(); });
@@ -2234,6 +2472,7 @@ function wireAdmin(){
   // role expectations
   const reu=document.getElementById("roleexpunit"); if(reu)reu.onchange=()=>{ adminRoleExpUnit=reu.value; renderView(); };
   document.querySelectorAll("#view [data-roleexp]").forEach(t=>t.oninput=()=>{ setRoleExp(adminRoleExpUnit,+t.dataset.roleexp,t.value); });
+  const saveReBtn=document.getElementById("saveRoleExpBtn"); if(saveReBtn)saveReBtn.onclick=saveRoleExpectations;
   const expBtn=document.getElementById("expRoleExp"); if(expBtn)expBtn.onclick=exportRoleExpectations;
   const impBtn=document.getElementById("impRoleExp"), impFile=document.getElementById("impRoleExpFile");
   if(impBtn&&impFile)impBtn.onclick=()=>impFile.click();
@@ -2284,7 +2523,7 @@ function wireAdmin(){
   if(tpNewInput)tpNewInput.onkeydown=(e)=>{ if(e.key==="Enter") doAddTP(); };
   // units
   const add=document.getElementById("addunit"), ni=document.getElementById("newunit");
-  function doAdd(){ const v=(ni.value||"").trim(); if(!v||state.cfg.businessUnits.includes(v))return; state.cfg.businessUnits.push(v); state.cfg.frameworks[v]=cloneFramework(); state.cfg.roleExpectations[v]={}; state.cfg.competencyImportance[v]={}; scheduleSave(); renderBU(); renderView(); }
+  function doAdd(){ const v=(ni.value||"").trim(); if(!v||state.cfg.businessUnits.includes(v))return; state.cfg.businessUnits.push(v); state.cfg.frameworks[v]=cloneFramework(v); state.cfg.roleExpectations[v]={}; state.cfg.competencyImportance[v]={}; scheduleSave(); renderBU(); renderView(); }
   if(add)add.onclick=doAdd; if(ni)ni.onkeydown=(e)=>{ if(e.key==="Enter")doAdd(); };
   document.querySelectorAll("#view [data-delunit]").forEach(b=>b.onclick=()=>{ const u=b.dataset.delunit; if(state.cfg.businessUnits.length<=1)return; state.cfg.businessUnits=state.cfg.businessUnits.filter(x=>x!==u); delete state.cfg.frameworks[u]; delete state.cfg.roleExpectations[u]; delete state.cfg.competencyImportance[u]; if(adminRoleExpUnit===u)adminRoleExpUnit=null; if(adminImportanceUnit===u)adminImportanceUnit=null; if(state.bu===u){ state.bu=state.cfg.businessUnits[0]; state.currentEmployeeId=""; ensureSession(); } scheduleSave(); renderBU(); renderView(); });
   // users & access
@@ -2312,22 +2551,15 @@ function updateMultLabels(){ const m=familyMultipliers(); m.forEach((f,i)=>{ con
 
 /* ================= INIT ================= */
 async function init(){
-  const [c,b,s,ce]=await Promise.all([loadKey(KEY_CFG),loadKey(KEY_BU),loadKey(KEY_SEL),loadKey(KEY_CUR_EMP)]);
-  const hadLocalCache=!!(c||b||s||ce); // this browser has opened the tool before, vs. a brand-new device
+  // cfg (the shared framework/employee roster/config) and sessions (the shared evaluation data) are
+  // synced across everyone via Firebase — load those first, same as before.
+  const [c,s,lu]=await Promise.all([loadKey(KEY_CFG),loadKey(KEY_SEL),loadKey(KEY_LAST_UPDATED)]);
+  const hadLocalCache=!!(c||s); // this browser has opened the tool before, vs. a brand-new device
   if(c&&c.frameworks)state.cfg=c;
-  if(b)state.bu=b;
   if(s)state.sessions=s;
-  if(ce)state.currentEmployeeId=ce;
-  if(!state.cfg.businessUnits.includes(state.bu))state.bu=state.cfg.businessUnits[0];
-  if(!state.cfg.frameworks[state.bu])state.cfg.frameworks[state.bu]=cloneFramework();
+  if(lu)_lastKnownUpdatedAt=lu; // what this device last confirmed was live — see the stale-write guard in pushToCloud()
   ensureAllShapes();
   migrateLegacySessions();
-  // A previously-selected employee may since have been deleted (or this may be a stale value from
-  // before employee-scoped sessions existed) — don't let a dangling ID silently reload someone else's
-  // ID slot or a session that no longer corresponds to a real person.
-  if(state.currentEmployeeId && !findEmployeeById(state.currentEmployeeId)) state.currentEmployeeId="";
-  ensureSession();
-  framework().forEach(sec=>{ if(openSecs[sec.id]===undefined)openSecs[sec.id]=true; });
 
   // Restore a previously-signed-in account on THIS device/browser, if that account still exists —
   // this only reads back which user id was signed in; the password itself is never stored anywhere.
@@ -2340,6 +2572,14 @@ async function init(){
       else localStorage.removeItem(KEY_SESSION); // account no longer exists — force a fresh sign-in
     }
   }catch(e){}
+
+  // Only now that we know which account (if any) is signed in on this device do we load ITS OWN
+  // navigation state — which business unit / employee it last had open here. This is local-only,
+  // never synced (see navScope()/keyBU()/keyCurEmp() near the top of this file), so it can only be
+  // loaded per-account rather than as part of the shared cfg/sessions pull above.
+  await loadNavStateForAccount();
+  if(!state.cfg.frameworks[state.bu])state.cfg.frameworks[state.bu]=cloneFramework(state.bu);
+  framework().forEach(sec=>{ if(openSecs[sec.id]===undefined)openSecs[sec.id]=true; });
 
   // If this device has never cached anything locally (a new phone/PC, or a cleared browser) and
   // cloud sync is configured, don't render yet with empty/default data — that would make opening the
