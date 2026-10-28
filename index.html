@@ -57,8 +57,22 @@
   .cellbtn.off:hover{background:var(--accentSoft) !important;color:var(--accent) !important}
   .cellbtn.stdreset{transition:opacity .12s ease}
   .cellbtn.stdreset:hover{opacity:.7;text-decoration:underline}
+  .cmp-pill{display:inline-block;padding:2px 8px;border-radius:6px;font-size:10.5px;font-weight:700;white-space:nowrap;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .ap-entry textarea.ev{min-height:56px}
   @media print{
+    *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
     header,.no-print{display:none !important}
+    @page{size:A4 portrait;margin:12mm}
+    .wrap{max-width:none !important}
+    .print-card{padding:0 !important;border:none !important}
+    .r-col{flex-direction:column !important;gap:10px !important}
+    .r-col>*{flex:1 1 auto !important;width:100% !important;min-width:0 !important}
+    .r-table{overflow:visible !important}
+    .print-card table{min-width:0 !important;width:100% !important}
+    .print-card td,.print-card th{font-size:10px !important;padding:5px 6px !important}
+    .print-card tr{break-inside:avoid;page-break-inside:avoid}
+    .r-sigs{gap:24px !important}
+    .r-sigs>*{flex:1 1 0 !important;min-width:0 !important}
     body{background:#fff}
     .print-card{border:1px solid #cfd6d2 !important}
     .wrap{padding:0}
@@ -345,6 +359,8 @@ function applyRemoteData(data){
     // If this device's signed-in account was deleted on another device while this remote snapshot
     // was in flight, don't leave it signed in against a user record that no longer exists.
     if(authUser && !findUserById(authUser.id)){ authUser=null; try{ localStorage.removeItem(KEY_SESSION); }catch(e){} }
+    noteCloudCounts(data);
+    runSchemaMigration();
     saveKey(KEY_CFG,state.cfg);
     changed=true;
   }
@@ -376,6 +392,7 @@ async function pullFromCloud(){
     if(hasUnsyncedLocalChanges()) return; // a local edit landed while this pull was in flight
     const data=snap.val();
     if(data){
+      if(!(data.cfg && Number(data.cfg.schemaVersion)>=SCHEMA_VERSION)) cloudBackupBeforeUpgrade(data);
       applyRemoteData(data);
       const stamp=_lastKnownUpdatedAt?new Date(_lastKnownUpdatedAt).toLocaleTimeString():"";
       updateSyncBadge("synced",stamp);
@@ -425,6 +442,18 @@ async function pushToCloud(){
       sessions:state.sessions,
       updatedAt:Date.now()
     };
+    // ---- Integrity guard (deployment/data protection) ----------------------------------------
+    // Never let a broken or emptied-out copy replace the shared data for everyone. If this copy is
+    // missing core data the cloud copy had, the push is refused and the latest cloud copy is reloaded.
+    const problem=integrityProblem(payload);
+    if(problem){
+      console.error("Cloud push blocked by integrity guard:", problem);
+      _syncedChangeSeq=_localChangeSeq;
+      updateSyncBadge("offline");
+      alert("Save to the cloud was stopped to protect the shared data: "+problem+".\n\nNothing online was changed. The latest saved copy will be reloaded now.");
+      pullFromCloud();
+      return;
+    }
     const seqAtPush=_localChangeSeq;
     _lastKnownUpdatedAt=payload.updatedAt; // set before the write so our own echo is recognized and skipped
     saveKey(KEY_LAST_UPDATED,_lastKnownUpdatedAt);
@@ -664,7 +693,7 @@ function ensureJGShape(){
 /* ---------- state ---------- */
 let state = { cfg:defaultConfig(), bu:DATA.DEFAULT_BUSINESS_UNITS[0], sessions:{}, tab:"evaluate", currentEmployeeId:"" };
 let openSecs = {};
-let adminPanel = "weights";
+let adminPanel = "dashboard";
 let adminOpenSec = null;
 let adminRoleExpUnit = null; // which department's role expectations the admin panel is editing
 let roleExpDirty = false; // true once typed text hasn't been committed via the explicit Save button yet
@@ -914,7 +943,8 @@ function ensureSession(){
 function patchSession(patch){
   const k=sessionKey();
   const cur=state.sessions[k]||{selections:{},emp:{},evidence:{},competency:{}};
-  state.sessions[k]=Object.assign({selections:{},emp:{},evidence:{},competency:{}},cur,patch);
+  const stamp=("submission" in patch)?{}:{lastEditAt:Date.now()}; // edits after submitting flag "Changed since submission"
+  state.sessions[k]=Object.assign({selections:{},emp:{},evidence:{},competency:{}},cur,patch,stamp);
   scheduleSave();
 }
 // One-time upgrade for sessions saved before this fix: they were keyed by a bare business-unit
@@ -1218,7 +1248,7 @@ function editFramework(updater){ const fw=state.cfg.frameworks[state.bu]||cloneF
 function renderTabs(){
   const el=document.getElementById("tabs");
   if(!authUser){ el.innerHTML=""; return; } // nothing to navigate to until signed in
-  const defs=[["evaluate","Evaluate"],["development","Development"],["report","Report"]];
+  const defs=[["evaluate","Evaluate"],["development","Development"],["report","Result"]]; // internal id stays "report" so saved tab state keeps working
   if(authUser.role==="Admin") defs.push(["admin","Admin"]); // Evaluators never see this tab at all
   el.innerHTML=defs.map(([id,lbl])=>
     `<button class="tabbtn ${state.tab===id?"on":""}" data-tab="${id}">${lbl}</button>`).join("");
@@ -1336,10 +1366,11 @@ function viewEmpForm(){
         ${curJGNum!=null?`<div style="font-size:10.5px;color:var(--faint);margin-top:4px">Job grades below the current grade (JG${curJGNum}) aren't selectable as a target.</div>`:""}
       </label>
       <label class="field" style="flex:1 1 200px;min-width:160px">
-        <div style="font-size:11.5px;color:var(--sub);font-weight:600;margin-bottom:4px">Assessed by</div>
-        <input class="inp" data-emp="assessedBy" value="${esc(e.assessedBy)}" placeholder="Assessor name & title" />
+        <div style="font-size:11.5px;color:var(--sub);font-weight:600;margin-bottom:4px">Evaluated by</div>
+        <input class="inp" data-emp="assessedBy" value="${esc(e.assessedBy)}" placeholder="Evaluator name & title" />
       </label>
     </div>
+    ${targetRoleExpBlock()}
   </div>`;
 }
 function wireEmpForm(afterChange){
@@ -1360,7 +1391,7 @@ function subBlock(sec,sub){
       </button>`;
   }).join("");
   return `<div id="subblock-${sec.id}-${sub.id}" style="padding:12px 16px;border-top:1px solid var(--lineSoft)">
-    <div style="font-size:13.5px;font-weight:620;margin-bottom:8px">${esc(sub.name)}</div>
+    <div class="row" style="gap:8px;margin-bottom:8px;flex-wrap:wrap"><span style="font-size:13.5px;font-weight:620">${esc(sub.name)}</span></div>
     <div style="display:flex;gap:12px;flex-wrap:wrap">
       <div style="flex:1 1 320px;min-width:280px;display:flex;flex-direction:column;gap:6px">${choices}</div>
       <div style="flex:1 1 220px;min-width:200px">
@@ -1435,7 +1466,7 @@ function confirmBar(){
   const complete=answered===totalSubs;
   return `<div class="row between" style="margin-top:20px;gap:12px;flex-wrap:wrap">
     <div style="font-size:12.5px;color:var(--faint)">${complete?"All sub-sections have a level selected.":(totalSubs-answered)+" sub-section(s) still need a level."}</div>
-    <button id="confirmbtn" class="btn btn-primary" ${complete?"":"disabled"} style="display:flex;align-items:center;gap:8px;padding:10px 20px;font-size:14px;${complete?"":"opacity:.45;cursor:not-allowed"}">✓ Confirm &amp; view report</button>
+    <button id="confirmbtn" class="btn btn-primary" ${complete?"":"disabled"} style="display:flex;align-items:center;gap:8px;padding:10px 20px;font-size:14px;${complete?"":"opacity:.45;cursor:not-allowed"}">✓ Confirm &amp; view result</button>
   </div>`;
 }
 function viewEvaluate(){
@@ -1498,36 +1529,6 @@ function gwcStatus(vals){
   return {label:"Green",color:"var(--gwcGreen)",id:"plus"};
 }
 function gwcMark(color,size,title){ return `<span title="${title?esc(title):""}" style="display:inline-block;width:${size||14}px;height:${size||14}px;border-radius:50%;background:${color};border:1px solid rgba(0,0,0,.12);vertical-align:middle"></span>`; }
-function gwcCard(){
-  const g=competency().gwc;
-  function row(field,label,desc){
-    const val=normGwcVal(g[field]);
-    return `<div style="padding:10px 0;border-top:1px solid var(--lineSoft)">
-      <div style="font-size:13px;font-weight:650;margin-bottom:2px">${label}</div>
-      <div style="font-size:11.5px;color:var(--sub);margin-bottom:8px;line-height:1.4">${desc}</div>
-      <div class="row" style="gap:6px">${GWC_OPTS.map(([id,lbl])=>{
-        const on=val===id; const color=gwcMarkColor(id);
-        return `<button class="btn" data-gwc="${field}|${id}" style="padding:6px 16px;font-size:13px;border-radius:7px;border:1px solid ${on?color:"var(--line)"};background:${on?color:"var(--card)"};color:${on?"#fff":"var(--sub)"};font-weight:${on?700:500}">${lbl}</button>`;
-      }).join("")}</div>
-    </div>`;
-  }
-  const vals=[g.get,g.want,g.capacity];
-  const status=gwcStatus(vals);
-  return `<div class="card" style="padding:16px;margin-bottom:16px">
-    <div class="eyebrow" style="margin-bottom:2px">GWC · RIGHT PERSON, RIGHT SEAT</div>
-    <div style="font-size:12.5px;color:var(--sub);line-height:1.5;margin-bottom:4px">From the Entrepreneurial Operating System (EOS) — rate each as + (yes), +/- (partial) or − (no).</div>
-    ${row("get","Get It","Understands the role, its priorities, and how it fits the bigger picture — the culture, systems and standards behind it.")}
-    ${row("want","Want It","Genuinely wants this role — wants it enough to earn it, not just fill it.")}
-    ${row("capacity","Capacity to do it","Has the time, knowledge, skill, and mental / emotional bandwidth to do the role well, now or with reasonable ramp-up.")}
-    <div class="row" style="margin-top:14px;padding:10px 12px;border-radius:8px;background:var(--paper);gap:10px">
-      <span class="eyebrow" style="margin:0">GWC STATUS</span>${gwcMark(status.color,18,status.label)}
-    </div>
-    <div style="margin-top:12px">
-      <div class="eyebrow" style="margin-bottom:6px">NOTES</div>
-      <textarea class="ev" data-gwcnotes style="min-height:70px" placeholder="Observations behind the GWC call…">${esc(g.notes)}</textarea>
-    </div>
-  </div>`;
-}
 const RATING_LETTERS=["A","B","C","D","E"]; // 1→A … 5→E, per the Proficiency Rating equivalence
 // Proficiency Rating is no longer entered by hand here — it is read straight off whatever
 // choice (A–E) was picked for the matching competency in the Evaluate form, via each
@@ -1619,106 +1620,18 @@ function competencyGapCard(){
     <table class="gap-table">${gapTableColgroup()}
       <thead><tr style="background:var(--paper)">
         <th>Competency</th><th style="text-align:center">Importance Rating</th><th style="text-align:center">Job Progression Standard 🔒</th><th style="text-align:center">Proficiency Standard</th>
-        <th style="text-align:center">Actual Evaluation Rating</th><th style="text-align:center">Competency Rating</th><th style="text-align:center">Gap Evaluation</th><th>Opportunity Plan</th><th>Development Plan</th>
+        <th style="text-align:center">Actual Evaluation Rating</th><th style="text-align:center">Competency Rating</th><th style="text-align:center">Gap Evaluation</th><th>Opportunity Plan</th><th>Suggested Training Program</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
     </div>
-    <div style="font-size:11px;color:var(--faint);margin-top:10px;line-height:1.5">Gap is bucketed by size (1–3 / 4–6 / &gt;7) and crossed with the competency's Importance to suggest an action — Reminders through Coaching for Low importance, up to Pull-out for Extensive Training / Job Transfer for High-importance, large gaps.</div>
-    <div style="font-size:11px;color:var(--faint);margin-top:4px;line-height:1.5">${gwcMark("var(--accent)",9)} Highlighted green when the Importance Rating is lower than the Gap Evaluation — the Opportunity Plan column opens up for the evaluator to type their own remarks.</div>
-    <div style="font-size:11px;color:var(--faint);margin-top:4px;line-height:1.5">Actual Evaluation Rating is pulled automatically from this employee's selected choice (A–E) on the matching competency in the Evaluate tab — A=1, B=2, C=3, D=4, E=5. Pick or change a choice there to update it here.</div>
-    <div style="font-size:11px;color:var(--faint);margin-top:4px;line-height:1.5">Job Progression Standard is locked to the employee's target/aspired Job Grade: JG1–JG3 = 1, JG4–JG6 = 2, JG7–JG9 = 3, JG10–JG12 = 4, JG13–JG17 = 5. Change it under the Evaluate tab's "Target / aspired job grade" field.</div>
-    <div style="font-size:11px;color:var(--faint);margin-top:4px;line-height:1.5">Importance Rating shows 🔒 when an admin has locked it for this unit and job grade family under Admin → Competency Importance (based on the employee's target/current Job Grade); otherwise it's set per employee here.</div>
-    <div style="font-size:11px;color:var(--faint);margin-top:4px;line-height:1.5">Development Plan is anchored to the Gap Evaluation result: a gap of −1 to −4 surfaces the admin-uploaded Conversational Planner form to download; a gap of −5 or beyond surfaces the admin-uploaded training program list for that competency, filtered to the job family tied to this employee's Job Progression Standard level${famId?` (currently <b>${esc(famName(famId))}</b>)`:""} — plus any programs uploaded for "All Families". Manage both under Admin → Development Plan.</div>
-  </div>`;
-}
-// Builds the raw gap data (current level vs target/aspired level, per competency) used by the
-// Development Plan "Generate summary" button — same math as the Competency Gap Analysis table,
-// kept separate so it can be composed into prose without touching the table's rendering.
-function buildDevPlanAnalysis(){
-  const e=emp();
-  const {jgNum}=resolveAssessJG();
-  const std= jgNum!=null?standardForTargetJG(jgNum):null;
-  const jgRow= jgNum!=null?state.cfg.jg.find(r=>r.jg===jgNum):null;
-  const famId= jgRow?jgRow.fam:null;
-  const items=COMP_ITEMS.map(item=>{
-    const impInfo=effectiveImportance(item.key); const a=impInfo.value;
-    const b=std;
-    const autoD=actualFromEval(item);
-    const rated=autoD!=null;
-    const d=rated?autoD:0;
-    const c=(a&&b)?a*b:null; const e2=a?a*d:null;
-    const gap=(c!=null&&e2!=null)?(e2-c):null;
-    const action = (gap!=null&&gap<0) ? (DEV_ACTIONS[gapBucket(Math.abs(gap))][a-1]||null) : null;
-    return {label:item.label,importance:a,rated,gap,action};
-  });
-  return {emp:e,jgNum,famId,items};
-}
-// Turns buildDevPlanAnalysis() into a plain-language summary: current vs target/aspired level, which
-// competencies need to close a gap, and the next-step HR intervention drawn straight from the same
-// Reminders → Coaching → Re-training → Pull-out/Transfer plan used in the Competency Gap Analysis table.
-function renderDevPlanSummaryText(){
-  const {emp:e,famId,items}=buildDevPlanAnalysis();
-  const curLbl=e.currentJG||"the current level",tgtLbl=e.targetJG||"the target/aspired level";
-  const famLbl=famId?famName(famId):null;
-  const rated=items.filter(i=>i.rated);
-  if(!rated.length){
-    return "No competencies have been rated yet in the Evaluate tab, so a gap-based summary can't be generated. Complete the Evaluate tab (and set Importance ratings above) first, then generate the summary again.";
-  }
-  const withImportance=rated.filter(i=>i.importance>0);
-  if(!withImportance.length){
-    return "Importance Ratings haven't been set for any competency yet, so a Gap Evaluation can't be computed. Set Importance (Low/Med/High) for the rated competencies above, then generate the summary again.";
-  }
-  // Rank by gap first (most negative = worst), then by Importance as a tiebreaker (High before Med before Low)
-  // — several competencies can legitimately land on the exact same gap, so ties have to be called out
-  // explicitly rather than silently naming whichever one happens to sort first.
-  const needsImprovement=withImportance.filter(i=>i.gap!=null&&i.gap<0).sort((x,y)=>(x.gap-y.gap)||(y.importance-x.importance));
-  const meeting=withImportance.filter(i=>i.gap!=null&&i.gap>=0);
-  const lines=[];
-  lines.push(`Current level: ${curLbl}${e.position?` (${e.position})`:""}. Target/aspired level: ${tgtLbl}${famLbl?` — ${famLbl} job family`:""}.`);
-  if(!needsImprovement.length){
-    lines.push(`Across the rated competencies, the employee currently meets or exceeds the Proficiency Standard expected at ${tgtLbl}. No priority HR intervention is indicated at this time — continue periodic monitoring and stretch assignments to sustain readiness for the target/aspired level.`);
-  } else {
-    lines.push(`To close the gap between the current level and ${tgtLbl}, the following competencies fall below the standard expected there, ranked from the largest gap:`);
-    needsImprovement.forEach(i=>{
-      const impLabel=["","Low","Med","High"][i.importance]||"Unrated";
-      lines.push(`- ${i.label}: gap of ${i.gap} (Importance: ${impLabel}). HR intervention plan: ${i.action||"review with immediate supervisor"}.`);
-    });
-    const worstGap=needsImprovement[0].gap;
-    const tiedWorst=needsImprovement.filter(i=>i.gap===worstGap);
-    if(tiedWorst.length===1){
-      const top=tiedWorst[0];
-      lines.push(`Next step: prioritize "${top.label}" first given the largest gap (${top.gap}) — formalize the "${top.action}" intervention with the employee's immediate supervisor, set a review/coaching schedule, and re-assess progress before advancing further toward ${tgtLbl}.`);
-    } else {
-      const maxImportance=Math.max(...tiedWorst.map(i=>i.importance));
-      const highestPriority=tiedWorst.filter(i=>i.importance===maxImportance);
-      const names=list=>list.map(i=>`"${i.label}"`).join(list.length>1?" and ":"");
-      if(highestPriority.length<tiedWorst.length){
-        lines.push(`Next step: ${tiedWorst.length} competencies are tied for the largest gap (${worstGap}) — ${tiedWorst.map(i=>i.label).join(", ")}. Among these, prioritize ${names(highestPriority)} first for having the higher Importance Rating — formalize the "${highestPriority[0].action}" intervention with the employee's immediate supervisor, set a review/coaching schedule, then work through the remaining tied competencies before advancing further toward ${tgtLbl}.`);
-      } else {
-        lines.push(`Next step: ${tiedWorst.length} competencies are tied for the largest gap (${worstGap}) with the same Importance Rating — ${tiedWorst.map(i=>i.label).join(", ")}. None of them outranks the others on gap size or importance alone, so address them together (or in whatever order best fits the employee's workload), formalizing the "${highestPriority[0].action}" intervention for each with the immediate supervisor and setting a review schedule before advancing further toward ${tgtLbl}.`);
-      }
-    }
-    if(meeting.length) lines.push(`Already meeting or exceeding standard: ${meeting.map(i=>i.label).join(", ")} — sustain through continued exposure and periodic check-ins.`);
-  }
-  return lines.join("\n\n");
-}
-function devPlanCard(){
-  const c=competency();
-  return `<div class="card" style="padding:16px;margin-bottom:16px">
-    <div class="between" style="margin-bottom:8px">
-      <div class="eyebrow">DEVELOPMENT PLAN — COMPETENCE THAT NEEDS IMPROVEMENT</div>
-      <button id="gendevsummary" class="btn btn-ghost" style="display:flex;align-items:center;gap:6px;padding:5px 11px;font-size:11.5px">✨ Generate summary from gap analysis</button>
-    </div>
-    <div style="font-size:11px;color:var(--faint);margin-bottom:8px;line-height:1.4">Generates a draft summary from the Competency Gap Analysis above — current vs. target/aspired level, which competencies need to close a gap, and the next-step HR intervention. Review and edit before saving.</div>
-    <textarea class="ev" data-devnotes style="min-height:100px" placeholder="Specify which competencies need improvement and the plan to close the gap…">${esc(c.devNotes)}</textarea>
   </div>`;
 }
 function viewDevelopment(){
   return viewEmpForm()+`<div class="between" style="margin-bottom:16px">
-    <div><div class="h1">Individual development assessment</div>
-      <div style="font-size:13px" class="muted">GWC (EOS) fit + Competency Profile &amp; Measurement Standard gap analysis</div></div>
-  </div>`+gwcCard()+competencyGapCard()+devPlanCard();
+    <div><div class="h1">Individual Development Assessment</div>
+      <div style="font-size:13px" class="muted">Right Person · Right Seat (EOS) + Competency Gap Analysis + Development Action Plan</div></div>
+  </div>`+idaCard()+competencyGapCard()+actionPlanCard()+submitCard();
 }
 function wireDevelopment(){
   wireEmpForm(refreshDevelopment);
@@ -1726,15 +1639,14 @@ function wireDevelopment(){
   document.querySelectorAll("#view [data-emp]:not([disabled])").forEach(inp=>inp.oninput=()=>{ setEmpField(inp.dataset.emp,inp.value); refreshDevelopment(); });
   document.querySelectorAll("#view [data-gwc]").forEach(b=>b.onclick=()=>{ const [f,v]=b.dataset.gwc.split("|"); setGwc(f,v); refreshDevelopment(); });
   const gn=document.querySelector("#view [data-gwcnotes]"); if(gn)gn.oninput=()=>setGwcNotes(gn.value);
+  document.querySelectorAll("#view [data-rp]").forEach(b=>b.onclick=()=>{ const [f,v]=b.dataset.rp.split("|"); setRP(f,v); refreshDevelopment(); });
+  const rpn=document.querySelector("#view [data-rpnotes]"); if(rpn)rpn.oninput=()=>setRPNotes(rpn.value);
   document.querySelectorAll("#view [data-imp]").forEach(b=>b.onclick=()=>{ const [k,n]=b.dataset.imp.split("|"); setItemField(k,"importance",Number(n)); refreshDevelopment(); });
   document.querySelectorAll("#view [data-remark]").forEach(t=>t.oninput=()=>setItemField(t.dataset.remark,"remark",t.value));
-  const dn=document.querySelector("#view [data-devnotes]"); if(dn)dn.oninput=()=>setDevNotes(dn.value);
-  const gs=document.getElementById("gendevsummary"); if(gs)gs.onclick=()=>{
-    const cur=(competency().devNotes||"").trim();
-    if(cur && !confirm("Replace the current Development Plan notes with a generated summary based on the Competency Gap Analysis above? You can still edit it afterward.")) return;
-    setDevNotes(renderDevPlanSummaryText());
-    refreshDevelopment();
-  };
+  // The old "Development Plan — Generate summary" card was removed (spec E). Any devNotes already
+  // saved stay untouched in the data and are still shown read-only on the Result page as archived notes.
+  wireActionPlan(refreshDevelopment);
+  const sb=document.getElementById("submitAssessBtn"); if(sb) sb.onclick=()=>{ submitAssessment(); refreshDevelopment(); };
 }
 function refreshDevelopment(){ const v=document.getElementById("view"); v.innerHTML=viewDevelopment(); wireDevelopment(); }
 
@@ -1756,10 +1668,20 @@ function signature(label,hint){
     <div style="font-size:11.5px;font-weight:700;color:var(--sub);margin-top:5px">${esc(label)}</div>
     <div style="font-size:11px;color:var(--faint)">${hint?esc(hint):"Name · Signature · Date"}</div></div>`;
 }
+function reportDefCell(r,ev){
+  if(!r.ch) return `<td><span style="color:var(--faint);font-style:italic">Not selected</span></td>`;
+  // Definition is highlighted against the Target / aspired job grade's required level:
+  // red = below, white = meets, green = above. No highlight when no target is set.
+  const k=compareLevel(r.ch.id); const st=k?CMP_STYLE[k]:null;
+  const cellStyle=st?`background:${st.bg};color:${st.fg};${k==="meets"?"box-shadow:inset 0 0 0 1px #9AA39E;":""}-webkit-print-color-adjust:exact;print-color-adjust:exact`:"";
+  const defColor=st?"inherit":"var(--sub)";
+  return `<td class="def-cell" style="${cellStyle}"${st?` title="${esc(st.label)}"`:""}><span style="color:${defColor};line-height:1.4">${esc(r.ch.def)}</span>${ev?`<span style="display:block;margin-top:4px;font-size:11.5px;color:${st?"inherit":"var(--ink)"};border-left:2px solid ${st&&k!=="meets"?"rgba(255,255,255,.7)":FAM[r.famIdx]};padding-left:7px;line-height:1.4"><b style="font-weight:700;opacity:.75">Evidence: </b>${esc(ev)}</span>`:""}</td>`;
+}
 function viewReport(){
   const bd=computeBreakdown(); const jg=lookupJG(bd.total); const e=emp();
   const color=jg?FAM[famIndex(jg.fam)]:"var(--ink)";
   const today=new Date().toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"});
+  const req=requiredLevelInfo();
   const rows=bd.rows.map((r,i)=>{
     const showSec=i===0||bd.rows[i-1].sec.id!==r.sec.id;
     const key=r.sec.id+"."+r.sub.id; const ev=evidence()[key];
@@ -1767,14 +1689,15 @@ function viewReport(){
       <td>${showSec?`<span style="font-size:11px;font-weight:700;color:var(--accent)">${r.sec.id} · ${esc(r.sec.name)}</span>`:""}</td>
       <td><span style="font-weight:600">${esc(r.sub.name)}</span></td>
       <td style="text-align:center">${r.ch?`<span class="tnum" style="font-weight:700;color:${FAM[r.famIdx]}">${r.ch.id.toUpperCase()}</span>`:'<span class="muted">—</span>'}</td>
-      <td>${r.ch?`<span style="color:var(--sub);line-height:1.4">${esc(r.ch.def)}</span>${ev?`<span style="display:block;margin-top:4px;font-size:11.5px;color:var(--ink);border-left:2px solid ${FAM[r.famIdx]};padding-left:7px;line-height:1.4"><b style="color:var(--faint);font-weight:700">Evidence: </b>${esc(ev)}</span>`:""}`:'<span style="color:var(--faint);font-style:italic">Not selected</span>'}</td>
+      ${reportDefCell(r,ev)}
       <td style="text-align:center" class="tnum">${r.ch?(Math.round(r.weight*100)/100):"—"}</td>
       <td class="tnum" style="text-align:center;color:var(--sub)">${r.ch?r.mult:"—"}</td>
       <td class="tnum" style="text-align:center;font-weight:600">${r.ch?Math.round(r.score).toLocaleString():"—"}</td>
     </tr>`;
   }).join("");
+  const legend=req?`<div class="row" style="gap:6px;flex-wrap:wrap;font-size:11px;color:var(--sub);margin-top:8px">Selected definitions are highlighted against target JG${req.jg} (required level ${RATING_LETTERS[req.req-1]}): ${cmpPill("below","Below")}${cmpPill("meets","Meets")}${cmpPill("above","Above")}</div>`:"";
   return `<div class="between no-print" style="margin-bottom:20px">
-      <div><div class="h1">Assessment report</div><div style="font-size:13px" class="muted">Printable breakdown — every level and its evidence</div></div>
+      <div><div class="h1">Assessment Result</div><div style="font-size:13px" class="muted">Printable breakdown — every level, its evidence, and the development outputs</div></div>
       <button id="printbtn" class="btn btn-primary no-print" style="display:flex;align-items:center;gap:6px;padding:8px 14px;font-size:13px">🖨 Print / PDF</button>
     </div>
     <div class="card print-card" style="padding:24px">
@@ -1782,15 +1705,17 @@ function viewReport(){
         <div><div style="font-size:18px;font-weight:700;letter-spacing:-.01em">Result</div>
           <div style="font-size:12.5px" class="muted">${esc(state.bu)} · ${today}</div></div>
         <div style="text-align:right"><div class="eyebrow">RESULT</div>
-          <div class="tnum" style="font-size:15px;font-weight:700;color:${color}">${jg?`JG${jg.jg} · ${esc(famName(jg.fam))}`:"—"}</div></div>
+          <div class="tnum" style="font-size:15px;font-weight:700;color:${color}">${jg?`JG${jg.jg} · ${esc(famName(jg.fam))}`:"—"}</div>
+          ${(()=>{ const si=submissionInfo(session()); return `<div style="font-size:11.5px;font-weight:700;color:${si.color};margin-top:4px">${esc(si.label)}${si.at?` · ${esc(apFmt(si.at))}`:""}</div>`; })()}</div>
       </div>
-      <div style="display:flex;gap:32px 32px;flex-wrap:wrap;margin-bottom:24px">
-        ${field("Employee name",e.name,true)}${field("Position",e.position)}${field("Current job grade",e.currentJG)}${field("Target / Aspired job grade",e.targetJG)}${field("Assessed by",e.assessedBy,true)}
+      <div class="r-col" style="display:flex;gap:16px 32px;flex-wrap:wrap">
+        ${field("Employee name",e.name,true)}${field("Position",e.position)}${field("Current job grade",e.currentJG)}${field("Target / Aspired job grade",e.targetJG)}${field("Evaluated by",e.assessedBy,true)}
       </div>
-      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:24px">
+      ${targetRoleExpReportBlock()}
+      <div class="r-col" style="display:flex;gap:16px;flex-wrap:wrap;margin:24px 0">
         ${summaryCard("Total score",bd.total.toLocaleString(),true,color,jg?`= JG${jg.jg} · ${famName(jg.fam)}`:"= —")}
       </div>
-      <div style="overflow-x:auto;border:1px solid var(--lineSoft);border-radius:10px">
+      <div class="r-table" style="overflow-x:auto;border:1px solid var(--lineSoft);border-radius:10px">
         <table style="min-width:720px">
           <thead><tr style="background:var(--paper)">
             <th>Section</th><th>Sub-section</th><th style="text-align:center">Lvl</th>
@@ -1804,14 +1729,11 @@ function viewReport(){
           </tr></tfoot>
         </table>
       </div>
-      ${jg&&getRoleExp(state.bu,jg.jg)?`<div style="margin-top:24px;background:var(--paper);border:1px solid var(--lineSoft);border-radius:10px;padding:14px 16px">
-        <div class="eyebrow" style="margin-bottom:6px">ROLE EXPECTATIONS · JG${jg.jg} · ${esc(state.bu.toUpperCase())}</div>
-        <div style="font-size:12.5px;line-height:1.55;color:var(--ink);white-space:pre-wrap">${esc(getRoleExp(state.bu,jg.jg))}</div>
-      </div>`:""}
-      <div style="display:flex;gap:40px;flex-wrap:wrap;margin-top:32px">
-        ${signature("Assessed by",e.assessedBy)}${signature("Employee acknowledgement",e.name)}${signature("Approved by")}
-      </div>
+      ${legend}
       ${reportDevBlock()}
+      <div class="r-sigs" style="display:flex;gap:40px;flex-wrap:wrap;margin-top:40px;padding-top:20px;border-top:2px solid var(--ink);break-inside:avoid;page-break-inside:avoid">
+        ${signature("Evaluated by",e.assessedBy)}${signature("Employee acknowledgement",e.name)}${signature("Approved by")}
+      </div>
     </div>`;
 }
 function reportDevBlock(){
@@ -1849,26 +1771,903 @@ function reportDevBlock(){
     </tr>`;
   }).join("");
   return `<div style="margin-top:28px;border-top:2px solid var(--ink);padding-top:20px">
-    <div style="font-size:18px;font-weight:700;letter-spacing:-.01em;margin-bottom:2px">Competency Gap &amp; Development Plan</div>
-    <div style="font-size:12.5px" class="muted">GWC (EOS) fit + Competency Profile &amp; Measurement Standard</div>
-    <div style="display:flex;gap:16px;flex-wrap:wrap;margin:16px 0;align-items:stretch">
-      ${summaryCard("Get It",gwcLabel[c.gwc.get]||"—")}${summaryCard("Want It",gwcLabel[c.gwc.want]||"—")}${summaryCard("Capacity",gwcLabel[c.gwc.capacity]||"—")}
-      <div style="background:var(--paper);border:1px solid var(--lineSoft);border-radius:10px;padding:12px 16px;min-width:120px">
-        <div class="eyebrow">GWC STATUS</div>
-        <div style="margin-top:6px">${gwcMark(status.color,20,status.label)}</div>
-      </div>
-    </div>
-    ${c.gwc.notes?`<div style="font-size:12px;color:var(--sub);line-height:1.5;margin-bottom:16px"><b>GWC notes: </b>${esc(c.gwc.notes)}</div>`:""}
+    <div style="font-size:18px;font-weight:700;letter-spacing:-.01em;margin-bottom:2px">Individual Development Assessment</div>
+    <div style="font-size:12.5px" class="muted">Right Person · Right Seat (EOS) + Competency Gap Analysis + Development Action Plan</div>
+    ${idaReportBlock()}
     <div style="font-size:12px;color:var(--sub);margin-bottom:8px">Job Progression Standard (b) calculated at ${jgNum!=null?`JG${jgNum}${jgRow?" · "+esc(famName(jgRow.fam)):""} (${src==="target"?"target grade":"current grade"})`:"—"}</div>
     <div style="border:1px solid var(--lineSoft);border-radius:10px;margin-bottom:16px;overflow:hidden">
       <table class="gap-table">${gapTableColgroup()}
-        <thead><tr style="background:var(--paper)"><th>Competency</th><th style="text-align:center">Importance Rating</th><th style="text-align:center">Job Progression Standard</th><th style="text-align:center">Proficiency Standard</th><th style="text-align:center">Actual Evaluation Rating</th><th style="text-align:center">Competency Rating</th><th style="text-align:center">Gap Evaluation</th><th>Opportunity Plan / Remarks</th><th>Development Plan</th></tr></thead>
+        <thead><tr style="background:var(--paper)"><th>Competency</th><th style="text-align:center">Importance Rating</th><th style="text-align:center">Job Progression Standard</th><th style="text-align:center">Proficiency Standard</th><th style="text-align:center">Actual Evaluation Rating</th><th style="text-align:center">Competency Rating</th><th style="text-align:center">Gap Evaluation</th><th>Opportunity Plan / Remarks</th><th>Suggested Training Program</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>
     <div style="font-size:10.5px;color:var(--faint);margin-top:-10px;margin-bottom:16px">${gwcMark("var(--accent)",9)} Rows highlighted green: Importance Rating is lower than the Gap Evaluation — evaluator remarks shown in place of the auto-suggested action.</div>
-    ${c.devNotes?`<div style="margin-bottom:20px"><div class="eyebrow" style="margin-bottom:4px">DEVELOPMENT PLAN — COMPETENCE THAT NEEDS IMPROVEMENT</div><div style="font-size:12.5px;line-height:1.55;white-space:pre-wrap">${esc(c.devNotes)}</div></div>`:""}
+    ${actionPlanReportBlock()}
+    
   </div>`;
+}
+
+/* =====================================================================================
+   v5 ADDITIONS — Right Person / Right Seat, Target-JG role expectations, level-vs-required
+   comparison, Development Action Plan, and data protection (restore points + guards).
+   All new per-employee data lives at the SESSION level (session.rightPerson, session.actionPlan),
+   never inside session.competency — an older copy of this page still open somewhere rebuilds the
+   competency object from scratch on every edit, so anything stored inside it would be wiped.
+   Session-level keys are carried along untouched by older copies (patchSession merges).
+   ===================================================================================== */
+const APP_VERSION="2026.10 · v5";
+const SCHEMA_VERSION=5;
+
+/* ---------- D. Role Expectations for the Target / aspired Job Grade ---------- */
+// Always read live from state.cfg.roleExpectations (Admin → Role Expectations) — never copied into
+// the employee's record — so any change an Admin makes shows up here immediately.
+function targetRoleExpBlock(){
+  const t=parseJGNumber(emp().targetJG);
+  if(t==null) return `<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--lineSoft);font-size:11.5px;color:var(--faint)">Select a Target / aspired job grade to load its Role Expectations automatically.</div>`;
+  const txt=getRoleExp(state.bu,t);
+  return `<div style="margin-top:12px;padding:12px 14px;border-radius:10px;background:var(--paper);border:1px solid var(--lineSoft)">
+    <div class="eyebrow" style="margin-bottom:6px">ROLE EXPECTATIONS · TARGET JG${t} · ${esc(state.bu.toUpperCase())}</div>
+    ${txt?`<div style="font-size:12.5px;line-height:1.5;color:var(--ink);white-space:pre-wrap">${esc(txt)}</div>`
+      :`<div style="font-size:12px;color:var(--faint);font-style:italic">No role expectations defined yet for JG${t} in ${esc(state.bu)}. An Admin can add them under Admin → Role Expectations.</div>`}
+  </div>`;
+}
+function targetRoleExpReportBlock(){
+  const t=parseJGNumber(emp().targetJG);
+  if(t==null) return "";
+  const txt=getRoleExp(state.bu,t);
+  return `<div style="margin-top:16px;background:var(--paper);border:1px solid var(--lineSoft);border-radius:10px;padding:14px 16px;break-inside:avoid">
+    <div class="eyebrow" style="margin-bottom:6px">ROLE EXPECTATIONS · TARGET / ASPIRED JG${t} · ${esc(state.bu.toUpperCase())}</div>
+    ${txt?`<div style="font-size:12.5px;line-height:1.55;color:var(--ink);white-space:pre-wrap">${esc(txt)}</div>`
+      :`<div style="font-size:12px;color:var(--faint);font-style:italic">Not yet defined for this unit and grade.</div>`}
+  </div>`;
+}
+
+/* ---------- G. Selected level vs required level of the Target / aspired Job Grade ---------- */
+// Required level = the Job Progression Standard for the target grade (JG1–3 = A, JG4–6 = B,
+// JG7–9 = C, JG10–12 = D, JG13–17 = E) — the same standard the Competency Gap Analysis uses.
+const CMP_STYLE={
+  below:{label:"Below required",bg:"#B3261E",fg:"#fff",bd:"#B3261E"},
+  meets:{label:"Meets required",bg:"#FFFFFF",fg:"#181C1A",bd:"#9AA39E"},
+  above:{label:"Above required",bg:"#186A54",fg:"#fff",bd:"#186A54"}
+};
+function requiredLevelInfo(){
+  const t=parseJGNumber(emp().targetJG);
+  if(t==null) return null;
+  const req=standardForTargetJG(t);
+  return req?{jg:t,req}:null;
+}
+function compareLevel(chId){
+  const r=requiredLevelInfo(); if(!r||!chId) return null;
+  const lvl=cIndex(chId)+1; if(lvl<1) return null;
+  return lvl<r.req?"below":(lvl===r.req?"meets":"above");
+}
+function cmpPill(kind,text){ const st=CMP_STYLE[kind]; return `<span class="cmp-pill" style="background:${st.bg};color:${st.fg};border:1px solid ${st.bd}">${esc(text||st.label)}</span>`; }
+function levelCompareChip(chId){
+  const r=requiredLevelInfo();
+  if(!r) return "";
+  const k=compareLevel(chId);
+  const reqTxt=`JG${r.jg} requires ${RATING_LETTERS[r.req-1]}`;
+  if(!k) return `<span class="cmp-pill" style="background:var(--paper);color:var(--faint);border:1px dashed var(--line)">${esc(reqTxt)}</span>`;
+  return cmpPill(k,`${CMP_STYLE[k].label} · ${reqTxt}`);
+}
+function levelCompareLegend(){
+  const r=requiredLevelInfo();
+  if(!r) return `<div style="font-size:11.5px;color:var(--faint);margin-top:4px">Set a Target / aspired job grade above to compare each selected level against what that grade requires.</div>`;
+  return `<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap;font-size:11.5px;color:var(--sub)">Compared with target JG${r.jg} (required level ${RATING_LETTERS[r.req-1]}): ${cmpPill("below","Below")}${cmpPill("meets","Meets")}${cmpPill("above","Above")}</div>`;
+}
+function levelResultCell(ch){
+  if(!ch) return `<span class="muted">—</span>`;
+  const r=requiredLevelInfo();
+  if(!r) return `<span style="font-size:10.5px;color:var(--faint)">No target set</span>`;
+  const k=compareLevel(ch.id);
+  return k?cmpPill(k,`${CMP_STYLE[k].label.split(" ")[0]} (${ch.id.toUpperCase()} vs ${RATING_LETTERS[r.req-1]})`):`<span class="muted">—</span>`;
+}
+function levelCompareSummaryCards(bd){
+  const r=requiredLevelInfo(); if(!r) return "";
+  const n={below:0,meets:0,above:0};
+  bd.rows.forEach(row=>{ const k=row.ch?compareLevel(row.ch.id):null; if(k) n[k]++; });
+  const card=(k,label)=>`<div style="background:${CMP_STYLE[k].bg};color:${CMP_STYLE[k].fg};border:1px solid ${CMP_STYLE[k].bd};border-radius:10px;padding:12px 16px;min-width:120px;-webkit-print-color-adjust:exact;print-color-adjust:exact">
+    <div style="font-size:11.5px;font-weight:700;letter-spacing:.04em;opacity:.85">${label}</div>
+    <div class="tnum" style="font-size:18px;font-weight:650;margin-top:2px">${n[k]}</div>
+    <div style="font-size:11px;opacity:.85">vs JG${r.jg} (req. ${RATING_LETTERS[r.req-1]})</div></div>`;
+  return card("below","BELOW REQUIRED")+card("meets","MEETS REQUIRED")+card("above","ABOVE REQUIRED");
+}
+
+/* ---------- B. Individual Development Assessment: Right Person + Right Seat ---------- */
+const RP_CRITERIA=[
+  ["trust","Built on Trust","Acts with integrity and honesty — keeps commitments, owns mistakes, and can be relied on by the team and by clients."],
+  ["together","We Get Things Done Together","Collaborates across teams, shares information and credit, and follows through as one team to deliver results."],
+  ["better","We Strive to Make Things Better","Keeps looking for ways to improve the work, the process and themselves — open to feedback and to change."]
+];
+const RS_CRITERIA=[
+  ["get","Get It","Understands the role, its priorities, and how it fits the bigger picture — the culture, systems and standards behind it."],
+  ["want","Want It","Genuinely wants this role — wants it enough to earn it, not just fill it."],
+  ["capacity","Capacity to Do It","Has the time, knowledge, skill, and mental / emotional bandwidth to do the role well, now or with reasonable ramp-up."]
+];
+const RATING_TEXT={plus:"+ (Yes)",pm:"+/- (Partly)",minus:"− (No)","":"Not rated"};
+function rightPerson(){ return Object.assign({trust:"",together:"",better:"",notes:""}, session().rightPerson||{}); }
+function setRP(field,val){ const r=rightPerson(); r[field]=(r[field]===val)?"":val; patchSession({rightPerson:r}); }
+function setRPNotes(v){ const r=rightPerson(); r.notes=v; patchSession({rightPerson:r}); }
+function fitStatus(vals,kind){
+  const s=gwcStatus(vals);
+  const label = s.id==="plus" ? `${kind} — Meets`
+    : s.id==="pm" ? `${kind} — Partially meets`
+    : s.id==="minus" ? `${kind} — Does not meet`
+    : "Incomplete";
+  return Object.assign({},s,{text:label});
+}
+function rightPersonStatus(){ const r=rightPerson(); return fitStatus([r.trust,r.together,r.better],"Right Person"); }
+function rightSeatStatus(){ const g=competency().gwc; return fitStatus([g.get,g.want,g.capacity],"Right Seat"); }
+function idaPanel(title,sub,criteria,values,attr,status,notesAttr,notesVal,notesPh){
+  const rows=criteria.map(([field,label,desc])=>{
+    const val=normGwcVal(values[field]||"");
+    return `<div style="padding:10px 0;border-top:1px solid var(--lineSoft)">
+      <div style="font-size:13px;font-weight:650">${label}</div>
+      <div style="font-size:11.5px;color:var(--sub);margin:2px 0 8px;line-height:1.4">${desc}</div>
+      <div class="row" style="gap:6px">${GWC_OPTS.map(([id,lbl])=>{
+        const on=val===id; const color=gwcMarkColor(id);
+        return `<button class="btn" ${attr}="${field}|${id}" style="padding:6px 16px;font-size:13px;border-radius:7px;border:1px solid ${on?color:"var(--line)"};background:${on?color:"var(--card)"};color:${on?"#fff":"var(--sub)"};font-weight:${on?700:500}">${lbl}</button>`;
+      }).join("")}</div>
+    </div>`;
+  }).join("");
+  return `<div style="flex:1 1 340px;min-width:280px;border:1px solid var(--lineSoft);border-radius:10px;padding:12px 14px;background:var(--card)">
+    <div style="font-size:14.5px;font-weight:700;color:var(--accent)">${title}</div>
+    <div style="font-size:11.5px;color:var(--faint);margin-bottom:4px">${sub}</div>
+    ${rows}
+    <div class="row" style="margin-top:12px;padding:10px 12px;border-radius:8px;background:var(--paper);gap:10px">
+      <span class="eyebrow" style="margin:0">RESULT STATUS</span>${gwcMark(status.color,18,status.text)}
+      <span style="font-size:12.5px;font-weight:700;color:${status.color}">${esc(status.text)}</span>
+    </div>
+    <div style="margin-top:10px">
+      <div class="eyebrow" style="margin-bottom:6px">NOTES</div>
+      <textarea class="ev" ${notesAttr} style="min-height:60px" placeholder="${notesPh}">${esc(notesVal)}</textarea>
+    </div>
+  </div>`;
+}
+function idaCard(){
+  const rp=rightPerson(), g=competency().gwc;
+  return `<div class="card" style="padding:16px;margin-bottom:16px">
+    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:stretch">
+      ${idaPanel("Right Person","Lives the PGB core values",RP_CRITERIA,rp,"data-rp",rightPersonStatus(),"data-rpnotes",rp.notes,"Observations behind the Right Person call…")}
+      ${idaPanel("Right Seat","GWC — Get It · Want It · Capacity to Do It (EOS)",RS_CRITERIA,g,"data-gwc",rightSeatStatus(),"data-gwcnotes",g.notes,"Observations behind the Right Seat call…")}
+    </div>
+  </div>`;
+}
+function idaReportBlock(){
+  const rp=rightPerson(), g=competency().gwc;
+  const lbl=v=>({plus:"+",pm:"+/-",minus:"−"}[normGwcVal(v||"")]||"—");
+  const block=(title,criteria,vals,status,notes)=>`<div style="flex:1 1 320px;min-width:260px;border:1px solid var(--lineSoft);border-radius:10px;padding:12px 14px">
+    <div class="between"><div style="font-size:14px;font-weight:700">${title}</div>
+      <div class="row" style="gap:6px">${gwcMark(status.color,14,status.text)}<span style="font-size:12px;font-weight:700;color:${status.color}">${esc(status.text)}</span></div></div>
+    <table style="margin-top:8px"><tbody>${criteria.map(([f,l])=>`<tr style="border-top:1px solid var(--lineSoft)"><td style="font-weight:600">${l}</td><td class="tnum" style="text-align:center;width:70px;font-weight:700;color:${gwcMarkColor(normGwcVal(vals[f]||""))}">${lbl(vals[f])}</td></tr>`).join("")}</tbody></table>
+    ${notes?`<div style="font-size:11.5px;color:var(--sub);line-height:1.5;margin-top:8px"><b>Notes: </b>${esc(notes)}</div>`:""}
+  </div>`;
+  return `<div class="r-col" style="display:flex;gap:16px;flex-wrap:wrap;margin:16px 0;align-items:stretch">
+    ${block("Right Person",RP_CRITERIA,rp,rightPersonStatus(),rp.notes)}
+    ${block("Right Seat",RS_CRITERIA,g,rightSeatStatus(),g.notes)}
+  </div>`;
+}
+
+/* ---------- F. Development Action Plan ---------- */
+const AP_STATUSES=["Ongoing","On Hold","Completed"];
+const AP_QUARTERS=["Q1","Q2","Q3","Q4"];
+const AP_STATUS_COLOR={"Ongoing":"#2F6FB0","On Hold":"#B4541E","Completed":"#186A54"};
+const AP_FIELD_LABELS={desc:"Development Plan Description",year:"Target Year",quarter:"Target Quarter",status:"Status",remarks:"Remarks"};
+let apOpenHistory={};
+let _apFocusVal={};
+function actorName(){ return authUser?authUser.username:"(signed out)"; }
+function apBlankItem(id){ return {id, desc:"", year:"", quarter:"", status:"", remarks:"", createdAt:Date.now(), createdBy:actorName(), updatedAt:0, updatedBy:"", history:[]}; }
+function apNewId(){ return "ap_"+Date.now()+"_"+Math.random().toString(36).slice(2,7); }
+function apNorm(it){
+  return {id:String(it.id||apNewId()), desc:String(it.desc??""), year:String(it.year??""), quarter:String(it.quarter??""),
+    status:String(it.status??""), remarks:String(it.remarks??""), createdAt:Number(it.createdAt)||0, createdBy:String(it.createdBy??""),
+    updatedAt:Number(it.updatedAt)||0, updatedBy:String(it.updatedBy??""),
+    history:(Array.isArray(it.history)?it.history:(it.history&&typeof it.history==="object"?Object.values(it.history):[])).map(h=>Object.assign({},h)),
+    removedAt:Number(it.removedAt)||0, removedBy:String(it.removedBy??"")};
+}
+function apArr(v){ return Array.isArray(v)?v:(v&&typeof v==="object"?Object.values(v):[]); }
+// Three placeholder entries are shown for a brand-new plan; they're only written to storage once
+// someone actually edits one (so merely viewing an employee never creates data).
+function actionPlan(){
+  const ap=session().actionPlan;
+  if(ap && (ap.items!=null || ap.removed!=null)){
+    return {items:apArr(ap.items).map(apNorm), removed:apArr(ap.removed).map(apNorm)};
+  }
+  return {items:[apBlankItem("ph_1"),apBlankItem("ph_2"),apBlankItem("ph_3")], removed:[]};
+}
+function apStrip(it){ const o=Object.assign({},it); if(!o.removedAt){ delete o.removedAt; delete o.removedBy; } return o; }
+function apSave(ap){ patchSession({actionPlan:{items:ap.items.map(apStrip), removed:ap.removed.map(apStrip), updatedAt:Date.now()}}); }
+function apMutate(fn){ const ap=actionPlan(); fn(ap); apSave(ap); }
+function apIsBlank(it){ return !it.desc.trim()&&!it.year&&!it.quarter&&!it.status&&!it.remarks.trim(); }
+function apSetValue(id,field,value){ apMutate(ap=>{ const it=ap.items.find(x=>x.id===id); if(!it) return; it[field]=value; it.updatedAt=Date.now(); it.updatedBy=actorName(); }); }
+function apLog(id,field,from,to,by){ apMutate(ap=>{ const it=ap.items.find(x=>x.id===id); if(!it) return; it.history.push({at:Date.now(),by:by||actorName(),field,from:String(from??""),to:String(to??"")}); }); }
+function apAdd(){ apMutate(ap=>{ const it=apBlankItem(apNewId()); it.history.push({at:Date.now(),by:actorName(),field:"entry",from:"",to:"Created"}); ap.items.push(it); }); }
+function apRemove(id){
+  const ap=actionPlan(); const it=ap.items.find(x=>x.id===id); if(!it) return;
+  if(!apIsBlank(it) && !confirm(`Remove this development action?\n\n"${it.desc||"(no description)"}"\n\nIt will be kept in the audit history (Change History / Removed Entries in the Excel export).`)) return;
+  ap.items=ap.items.filter(x=>x.id!==id);
+  if(!apIsBlank(it)){ it.removedAt=Date.now(); it.removedBy=actorName(); it.history.push({at:Date.now(),by:actorName(),field:"entry",from:"",to:"Removed"}); ap.removed.push(it); }
+  apSave(ap);
+}
+function apDefaultYears(){ const y=new Date().getFullYear(); const ys=[]; for(let i=y-1;i<=y+5;i++) ys.push(String(i)); return ys; }
+// Target Year choices come from Admin → Training Program Library → Target Years (state.cfg.apYears).
+// Until an Admin customises the list, a default range (last year to +5 years) is offered. A year an
+// entry already uses is always kept selectable, even if it's later removed from the list.
+function apConfiguredYears(){ const v=apArr(state.cfg.apYears).map(String).filter(y=>/^\d{4}$/.test(y)); return v.length?[...new Set(v)].sort():null; }
+function apYearOptions(cur){
+  const ys=(apConfiguredYears()||apDefaultYears()).slice();
+  if(cur && !ys.includes(String(cur))) ys.push(String(cur));
+  return ys.sort();
+}
+function apAdminAddYear(v){
+  const y=String(v||"").trim();
+  if(!/^\d{4}$/.test(y)){ alert("Enter a 4-digit year, e.g. 2030."); return; }
+  const ys=apConfiguredYears()||apDefaultYears();
+  if(ys.includes(y)){ alert(y+" is already in the list."); return; }
+  state.cfg.apYears=[...ys,y].sort(); scheduleSave(); renderView();
+}
+function apAdminRemoveYear(y){
+  const ys=(apConfiguredYears()||apDefaultYears()).filter(x=>x!==y);
+  if(!ys.length){ alert("Keep at least one target year in the list."); return; }
+  if(!confirm(`Remove ${y} from the Target Year choices?\n\nEntries that already use ${y} keep it.`)) return;
+  state.cfg.apYears=ys; scheduleSave(); renderView();
+}
+function apYearsAdminCard(){
+  const custom=apConfiguredYears(); const ys=custom||apDefaultYears();
+  return `<div class="card" style="padding:20px;margin-top:16px">
+    <div class="eyebrow" style="margin-bottom:8px">DEVELOPMENT ACTION PLAN · TARGET YEARS</div>
+    <p style="font-size:12.5px;color:var(--sub);line-height:1.5;margin:0 0 12px">These are the years evaluators can pick in the Target Year dropdown of every Development Action Plan entry.${custom?"":" Showing the default range — adding or removing a year saves your own list."}</p>
+    <div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:12px">${ys.map(y=>`<span class="tnum" style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;padding:4px 6px 4px 10px;border-radius:7px;background:var(--accentSoft);color:var(--accent)">${esc(y)}<button class="btn" data-apyeardel="${esc(y)}" title="Remove ${esc(y)}" style="background:transparent;border:none;color:var(--warn);padding:0 4px;cursor:pointer">✕</button></span>`).join("")}</div>
+    <div class="row" style="gap:8px">
+      <input id="apYearNew" class="inp" type="number" min="2000" max="2100" placeholder="e.g. ${Number(ys[ys.length-1])+1}" style="max-width:160px"/>
+      <button id="apYearAdd" class="btn btn-primary" style="padding:8px 14px;font-size:13px">＋ Add year</button>
+    </div>
+  </div>`;
+}
+function wireApYears(){
+  const add=document.getElementById("apYearAdd"), inp=document.getElementById("apYearNew");
+  if(add&&inp){ add.onclick=()=>apAdminAddYear(inp.value); inp.onkeydown=(e)=>{ if(e.key==="Enter") apAdminAddYear(inp.value); }; }
+  document.querySelectorAll("#view [data-apyeardel]").forEach(b=>b.onclick=()=>apAdminRemoveYear(b.dataset.apyeardel));
+}
+function apFmt(t){ return t?new Date(t).toLocaleString(undefined,{year:"numeric",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}):""; }
+function apSelect(id,field,opts,cur,ph){
+  const st=field==="status"&&cur?`color:#fff;background:${AP_STATUS_COLOR[cur]||"var(--sub)"};font-weight:700;border-color:${AP_STATUS_COLOR[cur]||"var(--line)"}`:(!cur?"border-color:#e2b5a3":"");
+  return `<select class="inp" data-apsel="${esc(id)}|${field}" style="${st}"><option value="">${ph}</option>${opts.map(o=>`<option value="${esc(o)}" ${o===cur?"selected":""} style="color:var(--ink);background:#fff">${esc(o)}</option>`).join("")}</select>`;
+}
+function apEntryRow(it,idx){
+  const onHold=it.status==="On Hold";
+  const needRemarks=onHold && !it.remarks.trim();
+  const showRemarks=onHold || it.remarks.trim();
+  const hist=it.history||[];
+  const open=!!apOpenHistory[it.id];
+  const lbl=(t,req)=>`<div style="font-size:11px;color:var(--sub);font-weight:600;margin-bottom:4px">${t}${req?' <span style="color:var(--gwcRed)">*</span>':""}</div>`;
+  return `<div class="ap-entry" style="border:1px solid var(--lineSoft);border-radius:10px;padding:12px;margin-bottom:10px;background:var(--card)">
+    <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
+      <span class="badge" style="margin-top:20px">${idx+1}</span>
+      <label style="flex:1 1 300px;min-width:220px">${lbl("Development Plan Description",true)}<textarea class="ev" data-apf="${esc(it.id)}|desc" placeholder="e.g. Attend Leadership Essentials training and lead one cross-team project">${esc(it.desc)}</textarea></label>
+      <label style="flex:0 0 112px">${lbl("Target Year",true)}${apSelect(it.id,"year",apYearOptions(it.year),it.year,"— Year —")}</label>
+      <label style="flex:0 0 112px">${lbl("Target Quarter",true)}${apSelect(it.id,"quarter",AP_QUARTERS,it.quarter,"— Qtr —")}</label>
+      <label style="flex:0 0 140px">${lbl("Status",true)}${apSelect(it.id,"status",AP_STATUSES,it.status,"— Status —")}</label>
+      <button class="btn no-print" data-apdel="${esc(it.id)}" title="Remove entry" style="background:transparent;border:none;cursor:pointer;color:var(--warn);padding:22px 4px 0">🗑</button>
+    </div>
+    ${showRemarks?`<div style="margin:10px 0 0 30px">
+      ${lbl(onHold?"Remarks (required while On Hold)":"Remarks",onHold)}
+      <textarea class="ev" data-apf="${esc(it.id)}|remarks" data-apremarks="${esc(it.id)}" style="min-height:48px;${needRemarks?"border-color:var(--gwcRed);background:#FDF1F0":""}" placeholder="Why is this on hold, and what's needed to resume it?">${esc(it.remarks)}</textarea>
+      <div data-apwarn="${esc(it.id)}" style="font-size:11px;color:var(--gwcRed);font-weight:600;margin-top:3px;${needRemarks?"":"display:none"}">Remarks are required while this entry is On Hold.</div>
+    </div>`:""}
+    <div class="row" style="gap:10px;margin:8px 0 0 30px;font-size:11px;color:var(--faint);flex-wrap:wrap">
+      <span>${it.updatedAt?`Last updated ${esc(apFmt(it.updatedAt))}${it.updatedBy?` by ${esc(it.updatedBy)}`:""}`:"Not yet saved"}</span>
+      ${hist.length?`<button class="btn" data-aphist="${esc(it.id)}" style="background:transparent;border:none;color:var(--accent);font-size:11px;padding:0;cursor:pointer">${open?"▾":"▸"} Change history (${hist.length})</button>`:""}
+    </div>
+    ${open&&hist.length?`<div style="margin:6px 0 0 30px;border:1px solid var(--lineSoft);border-radius:8px;overflow:hidden"><table><thead><tr style="background:var(--paper)"><th>When</th><th>By</th><th>Field</th><th>From</th><th>To</th></tr></thead><tbody>
+      ${hist.slice().reverse().map(h=>`<tr style="border-top:1px solid var(--lineSoft)"><td>${esc(apFmt(h.at))}</td><td>${esc(h.by||"")}</td><td>${esc(AP_FIELD_LABELS[h.field]||(h.field==="entry"?"Entry":h.field))}</td><td style="color:var(--sub)">${esc(h.from||"—")}</td><td>${esc(h.to||"—")}</td></tr>`).join("")}
+    </tbody></table></div>`:""}
+  </div>`;
+}
+function apMissingRemarksCount(ap){ return ap.items.filter(i=>i.status==="On Hold"&&!i.remarks.trim()).length; }
+function actionPlanCard(){
+  const ap=actionPlan(); const e=emp();
+  const missing=apMissingRemarksCount(ap);
+  const incomplete=ap.items.filter(i=>!apIsBlank(i)&&(!i.desc.trim()||!i.year||!i.quarter||!i.status)).length;
+  return `<div class="card" style="padding:16px;margin-bottom:16px">
+    <div class="between" style="margin-bottom:4px">
+      <div class="eyebrow">DEVELOPMENT ACTION PLAN</div>
+      <div class="row" style="gap:6px;flex-wrap:wrap">
+        <button id="apExport" class="btn btn-ghost" style="display:flex;align-items:center;gap:6px;padding:5px 11px;font-size:11.5px">⭳ Export (.xlsx)</button>
+        <button id="apImport" class="btn btn-ghost" style="display:flex;align-items:center;gap:6px;padding:5px 11px;font-size:11.5px">⭱ Import (.xlsx)</button>
+        <input id="apImportFile" type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none"/>
+      </div>
+    </div>
+    ${!e.employeeId?`<div style="font-size:11.5px;color:var(--warn);background:var(--warnSoft);border-radius:8px;padding:7px 10px;margin-bottom:10px">No employee selected — this plan is a scratch draft and isn't saved against anyone.</div>`:""}
+    <div id="apMissing" style="font-size:11.5px;color:var(--gwcRed);background:#FDF1F0;border-radius:8px;padding:7px 10px;margin-bottom:10px;font-weight:600;${missing?"":"display:none"}">${missing} entr${missing===1?"y is":"ies are"} On Hold without remarks — remarks are required.</div>
+    ${incomplete?`<div style="font-size:11.5px;color:var(--warn);margin-bottom:10px">${incomplete} entr${incomplete===1?"y is":"ies are"} missing a required field (description, year, quarter or status).</div>`:""}
+    <div>${ap.items.map(apEntryRow).join("")||`<div style="font-size:12px;color:var(--faint);font-style:italic;margin-bottom:10px">No entries yet.</div>`}</div>
+    <div class="row" style="gap:10px;flex-wrap:wrap">
+      <button id="apAdd" class="btn btn-ghost" title="Add a development action" style="display:flex;align-items:center;gap:6px;padding:7px 14px;font-size:13px;border-style:dashed">＋ Add development action</button>
+      ${ap.removed.length?`<span style="font-size:11px;color:var(--faint)">${ap.removed.length} removed entr${ap.removed.length===1?"y":"ies"} kept in the audit history (see Excel export).</span>`:""}
+    </div>
+  </div>`;
+}
+function apRefreshWarnings(){
+  const ap=actionPlan();
+  ap.items.forEach(it=>{
+    const need=it.status==="On Hold"&&!it.remarks.trim();
+    const w=document.querySelector(`[data-apwarn="${CSS.escape(it.id)}"]`); if(w) w.style.display=need?"":"none";
+    const t=document.querySelector(`[data-apremarks="${CSS.escape(it.id)}"]`); if(t){ t.style.borderColor=need?"var(--gwcRed)":""; t.style.background=need?"#FDF1F0":""; }
+  });
+  const m=document.getElementById("apMissing"); const n=apMissingRemarksCount(ap);
+  if(m){ m.style.display=n?"":"none"; m.textContent=`${n} entr${n===1?"y is":"ies are"} On Hold without remarks — remarks are required.`; }
+}
+function wireActionPlan(refresh){
+  document.querySelectorAll("#view [data-apf]").forEach(t=>{
+    const key=t.dataset.apf; const [id,field]=key.split("|");
+    t.onfocus=()=>{ _apFocusVal[key]=t.value; };
+    t.oninput=()=>{ apSetValue(id,field,t.value); if(field==="remarks") apRefreshWarnings(); };
+    t.onchange=()=>{ const from=_apFocusVal[key]; delete _apFocusVal[key]; if(from!==undefined && from!==t.value) apLog(id,field,from,t.value); };
+  });
+  document.querySelectorAll("#view [data-apsel]").forEach(sel=>sel.onchange=()=>{
+    const [id,field]=sel.dataset.apsel.split("|");
+    const cur=actionPlan().items.find(x=>x.id===id); const from=cur?cur[field]:"";
+    apSetValue(id,field,sel.value);
+    if(from!==sel.value) apLog(id,field,from,sel.value);
+    refresh();
+    if(field==="status" && sel.value==="On Hold"){
+      const t=document.querySelector(`[data-apremarks="${CSS.escape(id)}"]`); if(t && !t.value.trim()) t.focus();
+    }
+  });
+  document.querySelectorAll("#view [data-apdel]").forEach(b=>b.onclick=()=>{ apRemove(b.dataset.apdel); refresh(); });
+  document.querySelectorAll("#view [data-aphist]").forEach(b=>b.onclick=()=>{ const id=b.dataset.aphist; apOpenHistory[id]=!apOpenHistory[id]; refresh(); });
+  const add=document.getElementById("apAdd"); if(add) add.onclick=()=>{ apAdd(); refresh(); const all=document.querySelectorAll('#view [data-apf$="|desc"]'); if(all.length) all[all.length-1].focus(); };
+  const ex=document.getElementById("apExport"); if(ex) ex.onclick=exportActionPlan;
+  const ib=document.getElementById("apImport"), inf=document.getElementById("apImportFile");
+  if(ib&&inf) ib.onclick=()=>inf.click();
+  if(inf) inf.onchange=()=>{ if(inf.files&&inf.files[0]) importActionPlan(inf.files[0],refresh); inf.value=""; };
+}
+function exportActionPlan(){
+  if(typeof XLSX==="undefined"){ alert("Excel export isn't available right now — check your connection and try again."); return; }
+  const ap=actionPlan(); const e=emp();
+  const rows=[["Entry ID","Development Plan Description","Target Year","Target Quarter","Status","Remarks","Created","Created By","Last Updated","Updated By"]];
+  ap.items.forEach(it=>rows.push([it.id,it.desc,it.year,it.quarter,it.status,it.remarks,apFmt(it.createdAt),it.createdBy,apFmt(it.updatedAt),it.updatedBy]));
+  const hist=[["Entry ID","Description","Date / Time","Changed By","Field","From","To"]];
+  ap.items.concat(ap.removed).forEach(it=>it.history.forEach(h=>hist.push([it.id,it.desc,apFmt(h.at),h.by||"",AP_FIELD_LABELS[h.field]||(h.field==="entry"?"Entry":h.field),h.from||"",h.to||""])));
+  const rem=[["Entry ID","Development Plan Description","Target Year","Target Quarter","Status","Remarks","Removed","Removed By"]];
+  ap.removed.forEach(it=>rem.push([it.id,it.desc,it.year,it.quarter,it.status,it.remarks,apFmt(it.removedAt),it.removedBy]));
+  const info=[["Employee",e.name||"(no employee selected)"],["Position",e.position||""],["Current Job Grade",e.currentJG||""],["Target / Aspired Job Grade",e.targetJG||""],["Business Unit",state.bu],["Exported",apFmt(Date.now())],["Exported By",actorName()],["Note","Edit the 'Development Action Plan' sheet and import it back. Keep the Entry ID column so existing rows update instead of duplicating; leave Entry ID blank for new rows. Status: Ongoing / On Hold / Completed (remarks required for On Hold). Quarter: Q1–Q4."]];
+  const wb=XLSX.utils.book_new();
+  const ws=XLSX.utils.aoa_to_sheet(rows); ws["!cols"]=[{wch:22},{wch:60},{wch:11},{wch:13},{wch:12},{wch:45},{wch:20},{wch:14},{wch:20},{wch:14}];
+  XLSX.utils.book_append_sheet(wb,ws,"Development Action Plan");
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(hist),"Change History");
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rem),"Removed Entries");
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(info),"Info");
+  const slug=String(e.name||"draft").replace(/[^A-Za-z0-9]+/g,"-").replace(/^-|-$/g,"").toLowerCase()||"draft";
+  XLSX.writeFile(wb,`development-action-plan-${slug}.xlsx`);
+}
+function apNormQuarter(v){ const q=String(v??"").trim().toUpperCase().replace(/^QUARTER\s*/,"").replace(/^Q\s*/,""); return /^[1-4]$/.test(q)?"Q"+q:(q?null:""); }
+function apNormStatus(v){ const s=String(v??"").toLowerCase().replace(/[^a-z]/g,""); if(!s) return ""; if(s==="ongoing"||s==="inprogress") return "Ongoing"; if(s==="onhold"||s==="hold") return "On Hold"; if(s==="completed"||s==="complete"||s==="done") return "Completed"; return null; }
+function apNormYear(v){ const y=String(v??"").trim(); if(!y) return ""; return /^\d{4}$/.test(y)?y:null; }
+function importActionPlan(file,refresh){
+  if(typeof XLSX==="undefined"){ alert("Excel import isn't available right now — check your connection and try again."); return; }
+  const reader=new FileReader();
+  reader.onload=()=>{
+    let wb; try{ wb=XLSX.read(reader.result,{type:"array"}); }catch(err){ alert("Couldn't read that file — make sure it's a valid .xlsx file."); return; }
+    const sheetName=wb.SheetNames.find(n=>/action\s*plan|development/i.test(n))||wb.SheetNames[0];
+    const rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{defval:""});
+    if(!rows.length){ alert("That file doesn't contain any rows."); return; }
+    const fk=(row,res)=>{ for(const re of res){ const k=Object.keys(row).find(k=>re.test(k)); if(k) return k; } return null; };
+    const ap=actionPlan(); const warnings=[]; let added=0, updated=0, unchanged=0;
+    const by=actorName()+" (Excel import)";
+    rows.forEach((row,i)=>{
+      const rn=i+2;
+      const idK=fk(row,[/entry\s*id/i,/^id$/i]), dK=fk(row,[/description/i,/development\s*plan/i,/^plan$/i]), yK=fk(row,[/year/i]), qK=fk(row,[/quarter/i,/^q$/i]), sK=fk(row,[/status/i]), rK=fk(row,[/remark/i]);
+      const rec={desc:String(dK?row[dK]:"").trim(), year:apNormYear(yK?row[yK]:""), quarter:apNormQuarter(qK?row[qK]:""), status:apNormStatus(sK?row[sK]:""), remarks:String(rK?row[rK]:"").trim()};
+      if(rec.year===null){ warnings.push(`Row ${rn}: Target Year "${row[yK]}" isn't a 4-digit year — left blank.`); rec.year=""; }
+      if(rec.quarter===null){ warnings.push(`Row ${rn}: Target Quarter "${row[qK]}" isn't Q1–Q4 — left blank.`); rec.quarter=""; }
+      if(rec.status===null){ warnings.push(`Row ${rn}: Status "${row[sK]}" isn't Ongoing / On Hold / Completed — left blank.`); rec.status=""; }
+      if(!rec.desc&&!rec.year&&!rec.quarter&&!rec.status&&!rec.remarks) return;
+      if(rec.status==="On Hold"&&!rec.remarks) warnings.push(`Row ${rn}: On Hold without remarks — please add remarks after importing.`);
+      const id=idK?String(row[idK]).trim():"";
+      const existing=id?ap.items.find(x=>x.id===id):null;
+      if(existing){
+        let changed=false;
+        Object.keys(rec).forEach(f=>{ if(existing[f]!==rec[f]){ existing.history.push({at:Date.now(),by,field:f,from:existing[f],to:rec[f]}); existing[f]=rec[f]; changed=true; } });
+        if(changed){ existing.updatedAt=Date.now(); existing.updatedBy=by; updated++; } else unchanged++;
+      } else {
+        const it=Object.assign(apBlankItem(apNewId()),rec,{createdBy:by,updatedAt:Date.now(),updatedBy:by});
+        it.history.push({at:Date.now(),by,field:"entry",from:"",to:`Imported from ${file.name}`});
+        ap.items.push(it); added++;
+      }
+    });
+    if(!added&&!updated){ alert(unchanged?"Nothing to import — every row already matches the current plan.":"No usable rows found. Use the columns from an exported plan: Development Plan Description, Target Year, Target Quarter, Status, Remarks."); return; }
+    if(!confirm(`Import Development Action Plan from "${file.name}"?\n\n${added} new entr${added===1?"y":"ies"}, ${updated} updated${unchanged?`, ${unchanged} unchanged`:""}.${warnings.length?`\n\nWarnings:\n${warnings.slice(0,12).join("\n")}${warnings.length>12?`\n…and ${warnings.length-12} more`:""}`:""}\n\nExisting entries not in the file are kept. Every change is recorded in the change history.`)) return;
+    if(added) ap.items=ap.items.filter(it=>!(apIsBlank(it)&&!it.history.length&&!it.updatedAt)); // drop untouched blank placeholders
+    apSave(ap);
+    refresh();
+  };
+  reader.onerror=()=>alert("Couldn't read that file.");
+  reader.readAsArrayBuffer(file);
+}
+function actionPlanReportBlock(){
+  const ap=actionPlan(); const items=ap.items.filter(it=>!apIsBlank(it));
+  return `<div style="margin-bottom:20px">
+    <div class="eyebrow" style="margin-bottom:6px">DEVELOPMENT ACTION PLAN</div>
+    ${items.length?`<div style="border:1px solid var(--lineSoft);border-radius:10px;overflow:hidden"><table>
+      <thead><tr style="background:var(--paper)"><th>#</th><th>Development Plan Description</th><th style="text-align:center">Target</th><th style="text-align:center">Status</th><th>Remarks</th><th>Last Updated</th></tr></thead>
+      <tbody>${items.map((it,i)=>`<tr style="border-top:1px solid var(--lineSoft)">
+        <td class="tnum">${i+1}</td>
+        <td style="white-space:pre-wrap">${esc(it.desc)||'<span class="muted">—</span>'}</td>
+        <td class="tnum" style="text-align:center;white-space:nowrap">${esc([it.quarter,it.year].filter(Boolean).join(" ")||"—")}</td>
+        <td style="text-align:center">${it.status?`<span class="cmp-pill" style="background:${AP_STATUS_COLOR[it.status]};color:#fff;border:1px solid ${AP_STATUS_COLOR[it.status]}">${esc(it.status)}</span>`:'<span class="muted">—</span>'}</td>
+        <td style="white-space:pre-wrap;${it.status==="On Hold"&&!it.remarks.trim()?"color:var(--gwcRed);font-weight:600":""}">${it.remarks.trim()?esc(it.remarks):(it.status==="On Hold"?"Remarks required":'<span class="muted">—</span>')}</td>
+        <td style="font-size:11px;color:var(--sub)">${esc(apFmt(it.updatedAt))}${it.updatedBy?`<br>${esc(it.updatedBy)}`:""}</td>
+      </tr>`).join("")}</tbody></table></div>`
+      :`<div style="font-size:12px;color:var(--faint);font-style:italic">No development actions recorded yet.</div>`}
+  </div>`;
+}
+
+/* ---------- H. Data protection: restore points, validated migration, push guard ---------- */
+const KEY_BACKUP_INDEX="progression:backups:index:v1";
+const MAX_LOCAL_BACKUPS=6;
+function backupKey(ts){ return "progression:backup:"+ts; }
+function listLocalBackups(){ try{ const v=JSON.parse(localStorage.getItem(KEY_BACKUP_INDEX)||"[]"); return Array.isArray(v)?v:[]; }catch(e){ return []; } }
+function dataCounts(cfg,sessions){
+  cfg=cfg||{}; const ss=sessions||{};
+  let actionItems=0; Object.values(ss).forEach(x=>{ if(x&&x.actionPlan) actionItems+=apArr(x.actionPlan.items).length+apArr(x.actionPlan.removed).length; });
+  return {users:apArr(cfg.users).length, employees:apArr(cfg.employees).length, units:apArr(cfg.businessUnits).length,
+    sessions:Object.keys(ss).length, roleExpUnits:Object.keys(cfg.roleExpectations||{}).length,
+    trainingComps:Object.keys((cfg.devPlan&&cfg.devPlan.trainingPrograms)||{}).length, actionItems};
+}
+function createLocalBackup(reason){
+  const ts=Date.now();
+  const snap={appVersion:APP_VERSION, schemaVersion:Number(state.cfg&&state.cfg.schemaVersion)||0, savedAt:ts, reason, cfg:state.cfg, sessions:state.sessions};
+  let str; try{ str=JSON.stringify(snap); }catch(e){ return false; }
+  let idx=listLocalBackups();
+  for(let attempt=0; attempt<=MAX_LOCAL_BACKUPS; attempt++){
+    try{
+      localStorage.setItem(backupKey(ts),str);
+      idx.push({ts,reason,schemaVersion:snap.schemaVersion,appVersion:APP_VERSION,bytes:str.length,counts:dataCounts(state.cfg,state.sessions)});
+      while(idx.length>MAX_LOCAL_BACKUPS){ const old=idx.shift(); try{ localStorage.removeItem(backupKey(old.ts)); }catch(e){} }
+      localStorage.setItem(KEY_BACKUP_INDEX,JSON.stringify(idx));
+      return true;
+    }catch(e){
+      if(!idx.length) break; // nothing left to prune — storage is simply too small for this snapshot
+      const old=idx.shift(); try{ localStorage.removeItem(backupKey(old.ts)); localStorage.setItem(KEY_BACKUP_INDEX,JSON.stringify(idx)); }catch(_){}
+    }
+  }
+  console.warn("Local restore point could not be saved (browser storage full). Use Admin → Backup & Restore → Download full backup instead.");
+  return false;
+}
+function readLocalBackup(ts){ try{ return JSON.parse(localStorage.getItem(backupKey(ts))||"null"); }catch(e){ return null; } }
+let _migrationBackupDone=false;
+// Additive, validated schema upgrade. v5 adds only optional fields (session.rightPerson,
+// session.actionPlan, cfg.schemaVersion/schemaHistory) — nothing existing is renamed, moved or
+// deleted. A restore point is taken first, and if any record count would drop the change is undone.
+function runSchemaMigration(){
+  const from=Number(state.cfg.schemaVersion)||0;
+  if(from>=SCHEMA_VERSION) return true;
+  const before=JSON.stringify({cfg:state.cfg,sessions:state.sessions});
+  const beforeCounts=dataCounts(state.cfg,state.sessions);
+  if(!_migrationBackupDone && (beforeCounts.users||beforeCounts.employees||beforeCounts.sessions)){
+    createLocalBackup(`Automatic restore point before upgrading data from schema v${from} to v${SCHEMA_VERSION}`);
+    _migrationBackupDone=true;
+  }
+  try{
+    state.cfg.schemaVersion=SCHEMA_VERSION;
+    const hist=apArr(state.cfg.schemaHistory);
+    hist.push({from,to:SCHEMA_VERSION,at:Date.now(),appVersion:APP_VERSION});
+    state.cfg.schemaHistory=hist.slice(-20);
+    const after=dataCounts(state.cfg,state.sessions);
+    const dropped=Object.keys(beforeCounts).filter(k=>after[k]<beforeCounts[k]);
+    if(dropped.length) throw new Error("record count dropped: "+dropped.join(", "));
+    return true;
+  }catch(err){
+    const restored=JSON.parse(before); state.cfg=restored.cfg; state.sessions=restored.sessions;
+    console.error("Schema migration rolled back:",err);
+    return false;
+  }
+}
+// One-time copy of the shared cloud data, taken the first time any device running this version
+// sees an older-schema copy online. Stored in a sibling node so normal saves never overwrite it.
+async function cloudBackupBeforeUpgrade(raw){
+  try{
+    const ref=firebase.database().ref(FIREBASE_SYNC_PATH+"_backups/pre_schema_v"+SCHEMA_VERSION);
+    const ex=await ref.child("savedAt").once("value");
+    if(ex.exists()) return;
+    await ref.set({savedAt:Date.now(), appVersion:APP_VERSION, data:raw});
+  }catch(err){ console.warn("Cloud pre-upgrade backup skipped (database rules may not allow it):",err); }
+}
+let _cloudHigh={users:0,sessions:0};
+function noteCloudCounts(data){
+  const c=dataCounts(data&&data.cfg,data&&data.sessions);
+  _cloudHigh.users=Math.max(_cloudHigh.users,c.users);
+  _cloudHigh.sessions=Math.max(_cloudHigh.sessions,c.sessions);
+}
+function integrityProblem(payload){
+  const c=payload.cfg||{};
+  if(!c.frameworks||!Object.keys(c.frameworks).length) return "the job-grade framework data is missing";
+  if(!Array.isArray(c.businessUnits)||!c.businessUnits.length) return "the business unit list is empty";
+  if(_cloudHigh.users>0 && !apArr(c.users).length) return "every user account would be removed";
+  if(_cloudHigh.sessions>=3 && !Object.keys(payload.sessions||{}).length) return "every saved evaluation would be removed";
+  return null;
+}
+function maybeDailyRestorePoint(){
+  const idx=listLocalBackups(); const last=idx.length?idx[idx.length-1].ts:0;
+  const c=dataCounts(state.cfg,state.sessions);
+  if(Date.now()-last>24*3600*1000 && (c.users||c.employees)) createLocalBackup("Daily automatic restore point");
+}
+function downloadJSON(obj,name){
+  const blob=new Blob([JSON.stringify(obj,null,1)],{type:"application/json"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },500);
+}
+function fullBackupObject(reason){ return {appVersion:APP_VERSION, schemaVersion:Number(state.cfg.schemaVersion)||0, savedAt:Date.now(), reason:reason||"Manual download", cfg:state.cfg, sessions:state.sessions}; }
+function restoreFromSnapshot(snap,label){
+  if(!snap||!snap.cfg||!snap.cfg.frameworks||!Array.isArray(snap.cfg.businessUnits)){ alert("That backup doesn't look like a Role Profile backup (framework data is missing). Nothing was changed."); return; }
+  const c=dataCounts(snap.cfg,snap.sessions), cur=dataCounts(state.cfg,state.sessions);
+  const line=(k,l)=>`${l}: ${cur[k]} now → ${c[k]} after restore`;
+  if(!confirm(`Restore ${label}?\n\n${[line("users","User accounts"),line("employees","Employees"),line("sessions","Saved evaluations"),line("actionItems","Development action entries")].join("\n")}\n\nThis replaces the shared data for EVERYONE. A restore point of the current data is saved first, so this can be undone from this same panel.`)) return;
+  createLocalBackup("Automatic restore point before restoring "+label);
+  state.cfg=JSON.parse(JSON.stringify(snap.cfg));
+  state.sessions=JSON.parse(JSON.stringify(snap.sessions||{}));
+  ensureAllShapes(); migrateLegacySessions(); runSchemaMigration();
+  if(!state.cfg.businessUnits.includes(state.bu)) state.bu=state.cfg.businessUnits[0];
+  if(!state.cfg.frameworks[state.bu]) state.cfg.frameworks[state.bu]=cloneFramework(state.bu);
+  if(state.currentEmployeeId && !findEmployeeById(state.currentEmployeeId)) state.currentEmployeeId="";
+  ensureSession();
+  scheduleSave();
+  if(authUser && !findUserById(authUser.id)){ alert("Restored. Your account doesn't exist in that backup, so you've been signed out — sign in with an account from the backup."); doLogout(); return; }
+  renderBU(); renderTabs(); renderAuthBar(); renderView();
+  alert("Restore complete — the restored data is being synced to everyone.");
+}
+function adminBackup(){
+  const cur=dataCounts(state.cfg,state.sessions);
+  const list=listLocalBackups().slice().reverse();
+  const cnt=(c)=>c?`${c.users} users · ${c.employees} employees · ${c.sessions} evaluations`:"";
+  return `<div class="card" style="padding:20px;margin-bottom:16px">
+    <div class="eyebrow" style="margin-bottom:8px">CURRENT DATA · APP ${esc(APP_VERSION)} · DATA SCHEMA v${Number(state.cfg.schemaVersion)||0}</div>
+    <div class="row" style="gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--sub);margin-bottom:12px">
+      <span><b>${cur.users}</b> user accounts</span><span><b>${cur.employees}</b> employees</span><span><b>${cur.units}</b> business units</span>
+      <span><b>${cur.sessions}</b> saved evaluations</span><span><b>${cur.actionItems}</b> development action entries</span><span><b>${cur.trainingComps}</b> competencies with training programs</span>
+    </div>
+    <p style="font-size:12.5px;color:var(--sub);line-height:1.5;margin:0 0 12px">Download a full backup before every GitHub deployment or major change. Updates to this tool only <b>add</b> fields — existing records are never renamed or deleted — and a restore point is taken automatically before any data upgrade, once a day, and before every restore. Restore points are kept in this browser (last ${MAX_LOCAL_BACKUPS}); the first device to open a new version also saves a one-time copy of the online data under <code>${esc(FIREBASE_SYNC_PATH)}_backups</code> in Firebase.</p>
+    <div class="row" style="gap:8px;flex-wrap:wrap">
+      <button id="bkDownload" class="btn btn-primary" style="padding:8px 14px;font-size:13px">⭳ Download full backup (.json)</button>
+      <button id="bkCreate" class="btn btn-ghost" style="padding:8px 14px;font-size:13px">＋ Create restore point now</button>
+      <button id="bkRestoreFile" class="btn btn-warn" style="padding:8px 14px;font-size:13px">↺ Restore from backup file…</button>
+      <input id="bkRestoreInput" type="file" accept=".json,application/json" style="display:none"/>
+    </div>
+  </div>
+  <div class="card" style="padding:20px">
+    <div class="eyebrow" style="margin-bottom:10px">RESTORE POINTS IN THIS BROWSER (${list.length})</div>
+    ${list.length?`<div style="border:1px solid var(--lineSoft);border-radius:10px;overflow:hidden"><table>
+      <thead><tr style="background:var(--paper)"><th>Saved</th><th>Reason</th><th>Contents</th><th style="text-align:center">Actions</th></tr></thead>
+      <tbody>${list.map(b=>`<tr style="border-top:1px solid var(--lineSoft)">
+        <td style="white-space:nowrap">${esc(apFmt(b.ts))}</td><td>${esc(b.reason||"")}<div style="font-size:10.5px;color:var(--faint)">app ${esc(b.appVersion||"?")} · schema v${b.schemaVersion||0} · ${Math.round((b.bytes||0)/1024)} KB</div></td>
+        <td style="font-size:11.5px;color:var(--sub)">${esc(cnt(b.counts))}</td>
+        <td style="text-align:center;white-space:nowrap"><button class="btn btn-ghost" data-bkdl="${b.ts}" style="padding:4px 10px;font-size:11.5px">⭳ Download</button> <button class="btn btn-warn" data-bkrestore="${b.ts}" style="padding:4px 10px;font-size:11.5px">↺ Restore</button></td>
+      </tr>`).join("")}</tbody></table></div>`
+      :`<div style="font-size:12.5px;color:var(--faint);font-style:italic">No restore points in this browser yet.</div>`}
+  </div>`;
+}
+function wireAdminBackup(){
+  const d=document.getElementById("bkDownload"); if(d) d.onclick=()=>downloadJSON(fullBackupObject("Manual download"),`role-profile-backup-${new Date().toISOString().slice(0,10)}.json`);
+  const c=document.getElementById("bkCreate"); if(c) c.onclick=()=>{ if(createLocalBackup("Manual restore point by "+actorName())) renderView(); else alert("This browser's storage is full — use Download full backup instead."); };
+  const rb=document.getElementById("bkRestoreFile"), ri=document.getElementById("bkRestoreInput");
+  if(rb&&ri) rb.onclick=()=>ri.click();
+  if(ri) ri.onchange=()=>{
+    const f=ri.files&&ri.files[0]; ri.value=""; if(!f) return;
+    const r=new FileReader();
+    r.onload=()=>{ let snap; try{ snap=JSON.parse(r.result); }catch(e){ alert("That file isn't valid JSON."); return; } restoreFromSnapshot(snap,`backup file "${f.name}"`); };
+    r.readAsText(f);
+  };
+  document.querySelectorAll("#view [data-bkdl]").forEach(b=>b.onclick=()=>{ const s=readLocalBackup(b.dataset.bkdl); if(!s){ alert("That restore point is no longer available."); return; } downloadJSON(s,`role-profile-restore-point-${b.dataset.bkdl}.json`); });
+  document.querySelectorAll("#view [data-bkrestore]").forEach(b=>b.onclick=()=>{ const s=readLocalBackup(b.dataset.bkrestore); if(!s){ alert("That restore point is no longer available."); return; } restoreFromSnapshot(s,`restore point from ${apFmt(Number(b.dataset.bkrestore))}`); });
+}
+
+/* =====================================================================================
+   v5.1 — Submit step + Admin L&D Dashboard
+   ===================================================================================== */
+
+/* ---------- Submission (Development tab) ---------- */
+// session.submission = {at,by,status}; session.submissionHistory = [{at,by,action}].
+// patchSession() stamps session.lastEditAt on every other edit, so an assessment edited after it was
+// submitted shows as "Changed since submission" until it's resubmitted.
+function submissionInfo(sess){
+  const sb=sess&&sess.submission;
+  if(!sb||!sb.at) return {state:"draft",label:"Draft",color:"var(--faint)"};
+  const changed=(Number(sess.lastEditAt)||0)>Number(sb.at);
+  return changed
+    ? {state:"changed",label:"Changed since submission",color:"var(--gwcOrange)",at:sb.at,by:sb.by}
+    : {state:"submitted",label:"Submitted",color:"var(--gwcGreen)",at:sb.at,by:sb.by};
+}
+function submitChecklist(){
+  const e=emp(); const sel=selections();
+  const totalSubs=framework().reduce((n,s)=>n+s.subs.length,0);
+  const answered=Object.keys(sel).filter(k=>sel[k]).length;
+  const rp=rightPerson(), g=competency().gwc;
+  const rpDone=["trust","together","better"].every(f=>normGwcVal(rp[f]||""));
+  const rsDone=["get","want","capacity"].every(f=>normGwcVal(g[f]||""));
+  const items=actionPlan().items.filter(i=>!apIsBlank(i));
+  const complete=items.filter(i=>i.desc.trim()&&i.year&&i.quarter&&i.status);
+  const holdNoRemarks=items.filter(i=>i.status==="On Hold"&&!i.remarks.trim()).length;
+  return [
+    ["Employee selected", !!e.employeeId],
+    ["Target / aspired job grade selected", !!parseJGNumber(e.targetJG)],
+    ["Evaluated by provided", !!String(e.assessedBy||"").trim()],
+    [`Evaluate the position — every sub-section has a level (${answered}/${totalSubs})`, answered===totalSubs],
+    ["Right Person — all 3 criteria rated", rpDone],
+    ["Right Seat — all 3 criteria rated", rsDone],
+    ["Development Action Plan — at least one complete entry", complete.length>0],
+    ["Development Action Plan — every entry has description, year, quarter and status", items.length>0 && complete.length===items.length],
+    ["On Hold entries have remarks", holdNoRemarks===0]
+  ];
+}
+function submitCard(){
+  const list=submitChecklist(); const ready=list.every(x=>x[1]);
+  const info=submissionInfo(session());
+  const hist=apArr(session().submissionHistory);
+  const canSubmit=ready && info.state!=="submitted";
+  const btnLabel=info.state==="draft"?"✓ Submit assessment":"✓ Resubmit assessment";
+  return `<div class="card" style="padding:16px;margin-bottom:16px;border-color:${info.state==="submitted"?"var(--accent)":"var(--line)"}">
+    <div class="between" style="margin-bottom:10px">
+      <div class="eyebrow">SUBMIT ASSESSMENT</div>
+      <span style="font-size:12px;font-weight:700;color:${info.color}">${esc(info.label)}${info.at?` · ${esc(apFmt(info.at))}${info.by?` by ${esc(info.by)}`:""}`:""}</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px">${list.map(([t,ok])=>`<div style="font-size:12.5px;color:${ok?"var(--ink)":"var(--sub)"}"><span style="display:inline-block;width:18px;font-weight:700;color:${ok?"var(--gwcGreen)":"var(--gwcRed)"}">${ok?"✓":"✕"}</span>${esc(t)}</div>`).join("")}</div>
+    <div class="row" style="gap:12px;flex-wrap:wrap">
+      <button id="submitAssessBtn" class="btn btn-primary" ${canSubmit?"":"disabled"} style="padding:10px 20px;font-size:14px;${canSubmit?"":"opacity:.45;cursor:not-allowed"}">${btnLabel}</button>
+      <span style="font-size:11.5px;color:var(--faint)">${info.state==="submitted"?"Submitted — any further change will need to be resubmitted.":(ready?"Everything required is complete.":"Complete the items marked ✕ to enable Submit.")}</span>
+    </div>
+    ${hist.length?`<div style="font-size:11px;color:var(--faint);margin-top:10px">History: ${hist.slice(-5).reverse().map(h=>`${esc(h.action)} ${esc(apFmt(h.at))} by ${esc(h.by)}`).join(" · ")}</div>`:""}
+  </div>`;
+}
+function submitAssessment(){
+  if(!submitChecklist().every(x=>x[1])) return;
+  const info=submissionInfo(session());
+  const e=emp();
+  if(!confirm(`${info.state==="draft"?"Submit":"Resubmit"} the assessment for ${e.name||"this employee"}?\n\nIt will be marked as submitted and counted on the Admin dashboard.`)) return;
+  const now=Date.now(); const by=actorName();
+  const hist=apArr(session().submissionHistory).concat([{at:now,by,action:info.state==="draft"?"Submitted":"Resubmitted"}]);
+  patchSession({submission:{at:now,by,status:"Submitted"},submissionHistory:hist});
+}
+
+/* ---------- Admin dashboard (L&D view across every evaluated employee) ---------- */
+let dashUnit="_all", dashScope="all", dashTableFilter="all";
+function withEmpContext(rec,fn){
+  const sb=state.bu, se=state.currentEmployeeId;
+  try{
+    state.currentEmployeeId=rec._id;
+    const u=state.cfg.businessUnits.find(x=>sameUnit(x,rec.department)); if(u) state.bu=u;
+    return fn();
+  } finally { state.bu=sb; state.currentEmployeeId=se; }
+}
+function quarterEnd(year,q){ const y=Number(year), n=Number(String(q).replace(/\D/g,"")); if(!y||!n) return null; return new Date(y,n*3,0,23,59,59); }
+function compGapRow(item){
+  const {jgNum}=resolveAssessJG();
+  const std=jgNum!=null?standardForTargetJG(jgNum):null;
+  const a=effectiveImportance(item.key).value;
+  const d=actualFromEval(item);
+  if(d==null||!a||!std) return {rated:d!=null,gap:null,importance:a};
+  const gap=a*d-a*std;
+  return {rated:true,gap,importance:a,action:gap<0?(DEV_ACTIONS[gapBucket(Math.abs(gap))][a-1]||""):"Meets / exceeds standard"};
+}
+function empMetrics(rec){
+  return withEmpContext(rec,()=>{
+    const sess=state.sessions["emp:"+rec._id]||null;
+    const e=emp(); const bd=computeBreakdown(); const jg=lookupJG(bd.total);
+    const totalSubs=bd.rows.length; const answered=bd.rows.filter(r=>r.ch).length;
+    const tgt=parseJGNumber(e.targetJG);
+    const cmp={below:0,meets:0,above:0}; bd.rows.forEach(r=>{ const k=r.ch?compareLevel(r.ch.id):null; if(k) cmp[k]++; });
+    const rp=rightPersonStatus().id, rs=rightSeatStatus().id;
+    const gaps={}; COMP_ITEMS.forEach(it=>gaps[it.key]=compGapRow(it));
+    const items=actionPlan().items.filter(i=>!apIsBlank(i));
+    const today=new Date();
+    const acts=items.map(i=>{ const end=quarterEnd(i.year,i.quarter); return Object.assign({},i,{overdue:!!(end&&end<today&&i.status!=="Completed")}); });
+    const sub=submissionInfo(sess);
+    const started=!!(sess&&(answered||sess.rightPerson||sess.actionPlan||(sess.competency&&sess.competency.gwc&&(sess.competency.gwc.get||sess.competency.gwc.want||sess.competency.gwc.capacity))));
+    const evalDone=answered===totalSubs && totalSubs>0;
+    let readiness="na";
+    if(evalDone && tgt!=null && rp && rs){
+      const share=answered?cmp.below/answered:1;
+      if(cmp.below===0 && rp==="plus" && rs==="plus") readiness="ready";
+      else if(share<=0.25 && rp!=="minus" && rs!=="minus") readiness="dev";
+      else readiness="notyet";
+    }
+    return {rec, unit:state.bu, name:employeeFullName(rec), position:rec.position||"", currentJG:e.currentJG||(rec.jobGrade?"JG"+rec.jobGrade:""), targetJG:e.targetJG||"",
+      assessedJG:jg?jg.jg:null, score:bd.total, answered, totalSubs, cmp, rp, rs, gaps, acts, sub, started, evalDone, readiness, evaluatedBy:e.assessedBy||""};
+  });
+}
+const READINESS={ready:{label:"Ready now",color:"var(--gwcGreen)"},dev:{label:"Ready with development",color:"var(--gwcOrange)"},notyet:{label:"Not yet ready",color:"var(--gwcRed)"},na:{label:"Not yet assessed",color:"#B9C0BC"}};
+const FIT_LABEL={plus:"Meets",pm:"Partially",minus:"Does not meet","":"Not rated"};
+const FIT_COLOR={plus:"var(--gwcGreen)",pm:"var(--gwcOrange)",minus:"var(--gwcRed)","":"#B9C0BC"};
+function dashData(){
+  ensureEmployeesShape();
+  let recs=state.cfg.employees.slice();
+  if(dashUnit!=="_all") recs=recs.filter(r=>!r.department?false:sameUnit(r.department,dashUnit));
+  let rows=recs.map(empMetrics);
+  const scoped=dashScope==="submitted"?rows.filter(r=>r.sub.state!=="draft"):rows;
+  return {all:rows, rows:scoped};
+}
+function kpiTile(label,value,sub,accent){
+  return `<div class="card" style="padding:14px 16px;flex:1 1 160px;min-width:150px">
+    <div class="eyebrow">${esc(label)}</div>
+    <div class="tnum" style="font-size:26px;font-weight:700;margin-top:4px;color:${accent||"var(--ink)"}">${value}</div>
+    ${sub?`<div style="font-size:11.5px;color:var(--sub);margin-top:2px">${sub}</div>`:""}
+  </div>`;
+}
+function hbar(label,n,max,color,title,extra){
+  const w=max?Math.max(n?3:0,Math.round(n/max*100)):0;
+  return `<div title="${esc(title||`${label}: ${n}`)}" style="display:grid;grid-template-columns:minmax(140px,300px) 1fr 44px;gap:10px;align-items:center;padding:5px 0">
+    <span style="font-size:12px;color:var(--ink);font-weight:600">${esc(label)}${extra?`<div style="font-size:10.5px;color:var(--faint);font-weight:400">${extra}</div>`:""}</span>
+    <div style="height:12px;background:var(--lineSoft);border-radius:4px;overflow:hidden"><div style="height:100%;width:${w}%;background:${color};border-radius:0 4px 4px 0"></div></div>
+    <span class="tnum" style="font-size:12.5px;font-weight:700;text-align:right">${n}</span>
+  </div>`;
+}
+function stackBar(parts,total){
+  if(!total) return `<div style="height:16px;background:var(--lineSoft);border-radius:4px"></div>`;
+  return `<div style="display:flex;gap:2px;height:16px;border-radius:4px;overflow:hidden">${parts.filter(p=>p.n).map(p=>`<div title="${esc(p.label)}: ${p.n} (${Math.round(p.n/total*100)}%)" style="flex:${p.n} 1 0;background:${p.color}"></div>`).join("")}</div>
+    <div class="row" style="gap:12px;flex-wrap:wrap;margin-top:8px">${parts.map(p=>`<span style="font-size:11.5px;color:var(--sub);display:inline-flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:3px;background:${p.color};display:inline-block"></span>${esc(p.label)} <b class="tnum" style="color:var(--ink)">${p.n}</b></span>`).join("")}</div>`;
+}
+function dashSection(title,sub,body){
+  return `<div class="card" style="padding:18px;margin-bottom:16px">
+    <div style="font-size:15px;font-weight:700">${title}</div>
+    ${sub?`<div style="font-size:12px;color:var(--faint);margin:2px 0 12px">${sub}</div>`:`<div style="height:10px"></div>`}
+    ${body}
+  </div>`;
+}
+function fitMatrix(rows){
+  const keys=["plus","pm","minus"];
+  const advice={
+    "plus|plus":"Keep & grow — succession pool","plus|pm":"Coach into the seat","plus|minus":"Right person, wrong seat — consider redeployment",
+    "pm|plus":"Reinforce core values","pm|pm":"Targeted development plan","pm|minus":"Review role fit",
+    "minus|plus":"Values concern — address now","minus|pm":"Performance & values plan","minus|minus":"Critical — HR intervention"};
+  const cell=(rp,rs)=>{
+    const list=rows.filter(r=>r.rp===rp&&r.rs===rs);
+    const tone=(rp==="plus"&&rs==="plus")?"var(--accentSoft)":(rp==="minus"||rs==="minus")?"#FBEAE8":"#FBF1E4";
+    return `<td title="${esc(list.map(r=>r.name).join(", ")||"No employees")}" style="background:${tone};border:2px solid var(--card);text-align:center;vertical-align:middle;padding:10px 6px">
+      <div class="tnum" style="font-size:22px;font-weight:700">${list.length}</div>
+      <div style="font-size:10.5px;color:var(--sub);line-height:1.3">${advice[rp+"|"+rs]}</div></td>`;
+  };
+  const unrated=rows.filter(r=>!r.rp||!r.rs).length;
+  return `<div style="overflow-x:auto"><table style="table-layout:fixed;min-width:520px">
+    <thead><tr><th style="width:130px"></th>${keys.map(k=>`<th style="text-align:center">Right Seat: ${FIT_LABEL[k]}</th>`).join("")}</tr></thead>
+    <tbody>${keys.map(rp=>`<tr><th style="text-align:right;vertical-align:middle;white-space:normal">Right Person: ${FIT_LABEL[rp]}</th>${keys.map(rs=>cell(rp,rs)).join("")}</tr>`).join("")}</tbody>
+  </table></div>
+  <div style="font-size:11.5px;color:var(--faint);margin-top:8px">${unrated} employee(s) not yet rated on both Right Person and Right Seat. Hover a cell to see names.</div>`;
+}
+function trainingNeeds(rows){
+  return COMP_ITEMS.map(item=>{
+    const rated=rows.map(r=>r.gaps[item.key]).filter(g=>g&&g.gap!=null);
+    const below=rated.filter(g=>g.gap<0);
+    const planner=below.filter(g=>g.gap>=-4).length, training=below.filter(g=>g.gap<=-5).length;
+    const avg=rated.length?Math.round(rated.reduce((n,g)=>n+g.gap,0)/rated.length*10)/10:null;
+    const names=rows.filter(r=>{ const g=r.gaps[item.key]; return g&&g.gap!=null&&g.gap<0; }).map(r=>r.name);
+    const progs=new Set(); const tp=(state.cfg.devPlan&&state.cfg.devPlan.trainingPrograms&&state.cfg.devPlan.trainingPrograms[item.key])||{};
+    Object.values(tp).forEach(l=>apArr(l).forEach(p=>progs.add(p)));
+    return {item,rated:rated.length,below:below.length,planner,training,avg,names,progs:[...progs]};
+  }).sort((a,b)=>(b.below-a.below)||((a.avg??0)-(b.avg??0)));
+}
+function adminDashboard(){
+  const {all,rows}=dashData();
+  const unitOpts=`<option value="_all" ${dashUnit==="_all"?"selected":""}>All business units</option>`+state.cfg.businessUnits.map(u=>`<option ${u===dashUnit?"selected":""}>${esc(u)}</option>`).join("");
+  const filters=`<div class="row no-print" style="gap:10px;flex-wrap:wrap;margin-bottom:16px">
+    <select id="dashUnit" class="inp" style="max-width:240px">${unitOpts}</select>
+    <select id="dashScope" class="inp" style="max-width:260px"><option value="all" ${dashScope==="all"?"selected":""}>All employees (incl. drafts)</option><option value="submitted" ${dashScope==="submitted"?"selected":""}>Submitted assessments only</option></select>
+    <button id="dashExport" class="btn btn-ghost" style="padding:7px 12px;font-size:12.5px">⭳ Export dashboard (.xlsx)</button>
+    <button id="dashPrint" class="btn btn-ghost" style="padding:7px 12px;font-size:12.5px">🖨 Print</button>
+  </div>`;
+  if(!all.length) return filters+`<div class="card" style="padding:24px;font-size:13px;color:var(--faint)">No employees in this scope yet. Add employees under Admin → Employees, then evaluate them.</div>`;
+  const n=all.length;
+  const submitted=all.filter(r=>r.sub.state==="submitted").length, changed=all.filter(r=>r.sub.state==="changed").length;
+  const inProg=all.filter(r=>r.sub.state==="draft"&&r.started).length, notStarted=all.filter(r=>!r.started).length;
+  const ready=rows.filter(r=>r.readiness==="ready").length;
+  const acts=rows.flatMap(r=>r.acts.map(a=>Object.assign({},a,{emp:r})));
+  const done=acts.filter(a=>a.status==="Completed").length;
+  const overdue=acts.filter(a=>a.overdue);
+  const hold=acts.filter(a=>a.status==="On Hold");
+  const noPlan=rows.filter(r=>r.evalDone&&!r.acts.length).length;
+  const pct=(a,b)=>b?Math.round(a/b*100)+"%":"—";
+
+  const kpis=`<div class="row" style="gap:12px;flex-wrap:wrap;margin-bottom:16px;align-items:stretch">
+    ${kpiTile("EMPLOYEES IN SCOPE",n,`${rows.length} shown in the views below`)}
+    ${kpiTile("SUBMITTED",submitted,`${pct(submitted,n)} completion${changed?` · ${changed} changed since submission`:""}`,"var(--gwcGreen)")}
+    ${kpiTile("IN PROGRESS",inProg,`${notStarted} not started`,"var(--gwcOrange)")}
+    ${kpiTile("READY NOW FOR TARGET GRADE",ready,`${pct(ready,rows.filter(r=>r.readiness!=="na").length)} of assessed`,"var(--accent)")}
+    ${kpiTile("DEVELOPMENT ACTIONS",acts.length,`${pct(done,acts.length)} completed`)}
+    ${kpiTile("OVERDUE ACTIONS",overdue.length,`${hold.length} on hold · ${noPlan} assessed with no plan`,overdue.length?"var(--gwcRed)":"var(--ink)")}
+  </div>`;
+
+  const subParts=[{label:"Submitted",n:submitted,color:"var(--gwcGreen)"},{label:"Changed since submission",n:changed,color:"#7FB7A0"},{label:"In progress",n:inProg,color:"var(--gwcOrange)"},{label:"Not started",n:notStarted,color:"#C9CFCB"}];
+  const byUnit={}; all.forEach(r=>{ const u=r.unit; byUnit[u]=byUnit[u]||{n:0,s:0}; byUnit[u].n++; if(r.sub.state!=="draft") byUnit[u].s++; });
+  const unitRows=Object.keys(byUnit).sort().map(u=>hbar(u,byUnit[u].s,byUnit[u].n,"var(--accent)",`${u}: ${byUnit[u].s} of ${byUnit[u].n} submitted`,`${byUnit[u].s} of ${byUnit[u].n} submitted · ${pct(byUnit[u].s,byUnit[u].n)}`)).join("");
+  const progress=dashSection("Assessment completion","Where each employee's assessment stands — follow up on drafts before the review cycle closes.",
+    stackBar(subParts,n)+(Object.keys(byUnit).length>1?`<div style="margin-top:16px">${unitRows}</div>`:""));
+
+  const rd=["ready","dev","notyet","na"].map(k=>({label:READINESS[k].label,n:rows.filter(r=>r.readiness===k).length,color:READINESS[k].color}));
+  const readiness=dashSection("Readiness for target / aspired grade",
+    "Ready now = no sub-section below the target grade's required level and both Right Person and Right Seat met. Ready with development = at most 25% of levels below required and no ‘does not meet’.",
+    stackBar(rd,rows.length));
+
+  const fit=dashSection("Right Person × Right Seat","Where people sit on the EOS People Analyzer — the basis for retention, redeployment and coaching decisions.",fitMatrix(rows));
+
+  const tna=trainingNeeds(rows); const maxBelow=Math.max(1,...tna.map(t=>t.below));
+  const tnaBody=`${tna.map(t=>hbar(t.item.label,t.below,maxBelow,"var(--gwcRed)",`${t.item.label}: ${t.below} below standard — ${t.names.join(", ")||"none"}`,`${t.rated} rated · avg gap ${t.avg??"—"} · ${t.planner} coaching (−1 to −4) · ${t.training} formal training (−5 or worse)`)).join("")}
+    <div style="margin-top:14px;border:1px solid var(--lineSoft);border-radius:10px;overflow:hidden"><table>
+      <thead><tr style="background:var(--paper)"><th>Competency</th><th style="text-align:center">Below standard</th><th style="text-align:center">Need formal training</th><th>Training programs on file (Training Program Library)</th></tr></thead>
+      <tbody>${tna.map(t=>`<tr style="border-top:1px solid var(--lineSoft)"><td style="font-weight:600">${esc(t.item.label)}</td><td class="tnum" style="text-align:center">${t.below}</td><td class="tnum" style="text-align:center;font-weight:700;color:${t.training?"var(--gwcRed)":"var(--ink)"}">${t.training}</td><td style="font-size:11.5px">${t.progs.length?esc(t.progs.slice(0,6).join(" · "))+(t.progs.length>6?` +${t.progs.length-6} more`:""):(t.training?`<span style="color:var(--gwcRed);font-weight:600">No program on file — add one to the library</span>`:`<span class="muted">—</span>`)}</td></tr>`).join("")}</tbody>
+    </table></div>`;
+  const tnaSec=dashSection("Training needs analysis","Employees below the Job Progression Standard per competency (from the Competency Gap Analysis) — use this to prioritise the training calendar and budget.",tnaBody);
+
+  const apParts=AP_STATUSES.map(s=>({label:s,n:acts.filter(a=>a.status===s).length,color:AP_STATUS_COLOR[s]}));
+  const today=new Date(); const qs=[]; let y=today.getFullYear(), q=Math.floor(today.getMonth()/3)+1;
+  for(let i=0;i<6;i++){ qs.push({y:String(y),q:"Q"+q}); q++; if(q>4){q=1;y++;} }
+  const maxQ=Math.max(1,...qs.map(x=>acts.filter(a=>a.year===x.y&&a.quarter===x.q&&a.status!=="Completed").length));
+  const timeline=qs.map(x=>{ const l=acts.filter(a=>a.year===x.y&&a.quarter===x.q&&a.status!=="Completed"); return hbar(`${x.q} ${x.y}`,l.length,maxQ,"#2F6FB0",`${x.q} ${x.y}: ${l.map(a=>a.emp.name+" — "+a.desc).join("; ")||"none"}`); }).join("");
+  const listRows=(list,showRemarks)=>list.length?`<div style="border:1px solid var(--lineSoft);border-radius:10px;overflow:hidden;margin-top:6px"><table><thead><tr style="background:var(--paper)"><th>Employee</th><th>Action</th><th>Target</th><th>Status</th>${showRemarks?"<th>Remarks</th>":""}</tr></thead><tbody>${list.slice(0,15).map(a=>`<tr style="border-top:1px solid var(--lineSoft)"><td style="font-weight:600">${esc(a.emp.name)}</td><td>${esc(a.desc)}</td><td class="tnum" style="white-space:nowrap">${esc(a.quarter)} ${esc(a.year)}</td><td><span class="cmp-pill" style="background:${AP_STATUS_COLOR[a.status]||"#999"};color:#fff">${esc(a.status||"—")}</span></td>${showRemarks?`<td style="${a.remarks.trim()?"":"color:var(--gwcRed);font-weight:600"}">${esc(a.remarks.trim()||"Remarks missing")}</td>`:""}</tr>`).join("")}</tbody></table></div>${list.length>15?`<div style="font-size:11px;color:var(--faint);margin-top:4px">+${list.length-15} more in the Excel export</div>`:""}`:`<div style="font-size:12px;color:var(--faint);font-style:italic;margin-top:6px">None.</div>`;
+  const apSec=dashSection("Development action plan tracking","Status of every action across the evaluated population, what's due in the next six quarters, and what needs follow-up.",
+    `${stackBar(apParts,acts.length)}
+    <div class="flexwrap" style="margin-top:16px;gap:24px">
+      <div style="flex:1 1 340px;min-width:280px"><div class="eyebrow" style="margin-bottom:6px">OPEN ACTIONS DUE BY QUARTER</div>${timeline}</div>
+      <div style="flex:1 1 420px;min-width:280px"><div class="eyebrow" style="color:var(--gwcRed)">OVERDUE (TARGET QUARTER PASSED, NOT COMPLETED) · ${overdue.length}</div>${listRows(overdue,false)}
+        <div class="eyebrow" style="margin-top:14px">ON HOLD · ${hold.length}</div>${listRows(hold,true)}</div>
+    </div>`);
+
+  const tf=dashTableFilter;
+  const tableRows=rows.filter(r=>tf==="all"||(tf==="draft"?r.sub.state!=="submitted":tf==="notready"?r.readiness==="notyet":tf==="overdue"?r.acts.some(a=>a.overdue):true));
+  const mark=(id)=>`<span title="${FIT_LABEL[id||""]}" style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${FIT_COLOR[id||""]}"></span> <span style="font-size:11px">${FIT_LABEL[id||""]}</span>`;
+  const table=dashSection("Employee development roster","One line per employee — open any row to see the full Result.",
+    `<div class="row no-print" style="gap:6px;flex-wrap:wrap;margin-bottom:10px">${[["all","All"],["draft","Not yet submitted"],["notready","Not yet ready"],["overdue","Has overdue actions"]].map(([k,l])=>`<button class="btn" data-dashtf="${k}" style="padding:5px 11px;font-size:12px;border-radius:7px;border:1px solid ${tf===k?"var(--ink)":"var(--line)"};background:${tf===k?"var(--ink)":"var(--card)"};color:${tf===k?"#fff":"var(--sub)"}">${l}</button>`).join("")}</div>
+    <div style="overflow-x:auto;border:1px solid var(--lineSoft);border-radius:10px"><table style="min-width:1050px">
+      <thead><tr style="background:var(--paper)"><th>Employee</th><th>Unit</th><th>Current → Target</th><th style="text-align:center">Assessed</th><th>Right Person</th><th>Right Seat</th><th>Readiness</th><th style="text-align:center">Below req.</th><th style="text-align:center">Comp. gaps</th><th style="text-align:center">Actions (O/H/C)</th><th>Status</th><th></th></tr></thead>
+      <tbody>${tableRows.map(r=>{
+        const gapsBelow=Object.values(r.gaps).filter(g=>g.gap!=null&&g.gap<0).length;
+        const c=s=>r.acts.filter(a=>a.status===s).length; const od=r.acts.filter(a=>a.overdue).length;
+        return `<tr style="border-top:1px solid var(--lineSoft)">
+          <td><div style="font-weight:600">${esc(r.name)}</div><div style="font-size:10.5px;color:var(--faint)">${esc(r.position)}</div></td>
+          <td style="font-size:11.5px">${esc(r.unit)}</td>
+          <td class="tnum">${esc(r.currentJG||"—")} → <b>${esc(r.targetJG||"—")}</b></td>
+          <td class="tnum" style="text-align:center">${r.evalDone&&r.assessedJG?"JG"+r.assessedJG:`<span class="muted">${r.answered}/${r.totalSubs}</span>`}</td>
+          <td>${mark(r.rp)}</td><td>${mark(r.rs)}</td>
+          <td><span style="font-size:11.5px;font-weight:700;color:${READINESS[r.readiness].color}">${READINESS[r.readiness].label}</span></td>
+          <td class="tnum" style="text-align:center;${r.cmp.below?"color:var(--gwcRed);font-weight:700":""}">${r.targetJG?r.cmp.below:"—"}</td>
+          <td class="tnum" style="text-align:center;${gapsBelow?"color:var(--gwcRed);font-weight:700":""}">${gapsBelow}</td>
+          <td class="tnum" style="text-align:center">${c("Ongoing")}/${c("On Hold")}/${c("Completed")}${od?`<div style="font-size:10.5px;color:var(--gwcRed);font-weight:700">${od} overdue</div>`:""}</td>
+          <td><span style="font-size:11.5px;font-weight:700;color:${r.sub.color}">${esc(r.sub.state==="draft"?(r.started?"In progress":"Not started"):r.sub.label)}</span>${r.sub.at?`<div style="font-size:10.5px;color:var(--faint)">${esc(apFmt(r.sub.at))}</div>`:""}</td>
+          <td class="no-print"><button class="btn btn-ghost" data-dashopen="${esc(r.rec._id)}" style="padding:4px 10px;font-size:11.5px">Open</button></td>
+        </tr>`; }).join("")||`<tr><td colspan="12" style="color:var(--faint);font-style:italic">No employees match this filter.</td></tr>`}</tbody>
+    </table></div>`);
+
+  return filters+kpis+progress+readiness+fit+tnaSec+apSec+table;
+}
+function exportDashboard(){
+  if(typeof XLSX==="undefined"){ alert("Excel export isn't available right now — check your connection and try again."); return; }
+  const {rows}=dashData();
+  const emp=[["Employee","Position","Business Unit","Current JG","Target JG","Assessed JG","Total Score","Levels Rated","Below Required","Meets Required","Above Required","Right Person","Right Seat","Readiness","Competency Gaps Below Std","Actions Ongoing","Actions On Hold","Actions Completed","Overdue Actions","Submission Status","Submitted At","Submitted By","Evaluated By"]];
+  rows.forEach(r=>{ const c=s=>r.acts.filter(a=>a.status===s).length;
+    emp.push([r.name,r.position,r.unit,r.currentJG,r.targetJG,r.assessedJG?"JG"+r.assessedJG:"",r.score,`${r.answered}/${r.totalSubs}`,r.cmp.below,r.cmp.meets,r.cmp.above,FIT_LABEL[r.rp||""],FIT_LABEL[r.rs||""],READINESS[r.readiness].label,Object.values(r.gaps).filter(g=>g.gap!=null&&g.gap<0).length,c("Ongoing"),c("On Hold"),c("Completed"),r.acts.filter(a=>a.overdue).length,r.sub.state==="draft"?(r.started?"In progress":"Not started"):r.sub.label,apFmt(r.sub.at),r.sub.by||"",r.evaluatedBy]); });
+  const tna=[["Competency","Employees Rated","Below Standard","Coaching (gap −1 to −4)","Formal Training (gap −5 or worse)","Average Gap","Employees Below Standard","Training Programs on File"]];
+  trainingNeeds(rows).forEach(t=>tna.push([t.item.label,t.rated,t.below,t.planner,t.training,t.avg??"",t.names.join(", "),t.progs.join("; ")]));
+  const gaps=[["Employee","Business Unit","Competency","Importance","Gap","Suggested Action"]];
+  rows.forEach(r=>COMP_ITEMS.forEach(it=>{ const g=r.gaps[it.key]; if(g&&g.gap!=null) gaps.push([r.name,r.unit,it.label,["","Low","Med","High"][g.importance]||"",g.gap,g.action||""]); }));
+  const acts=[["Employee","Business Unit","Development Plan Description","Target Year","Target Quarter","Status","Remarks","Overdue","Last Updated","Updated By"]];
+  rows.forEach(r=>r.acts.forEach(a=>acts.push([r.name,r.unit,a.desc,a.year,a.quarter,a.status,a.remarks,a.overdue?"Yes":"",apFmt(a.updatedAt),a.updatedBy])));
+  const wb=XLSX.utils.book_new();
+  [["Employees",emp],["Training Needs",tna],["Competency Gaps",gaps],["Action Plans",acts]].forEach(([n,d])=>XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(d),n));
+  XLSX.writeFile(wb,`ld-dashboard-${dashUnit==="_all"?"all-units":dashUnit.replace(/[^A-Za-z0-9]+/g,"-")}-${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+function wireDashboard(){
+  const u=document.getElementById("dashUnit"); if(u) u.onchange=()=>{ dashUnit=u.value; renderView(); };
+  const s=document.getElementById("dashScope"); if(s) s.onchange=()=>{ dashScope=s.value; renderView(); };
+  const ex=document.getElementById("dashExport"); if(ex) ex.onclick=exportDashboard;
+  const pr=document.getElementById("dashPrint"); if(pr) pr.onclick=()=>window.print();
+  document.querySelectorAll("#view [data-dashtf]").forEach(b=>b.onclick=()=>{ dashTableFilter=b.dataset.dashtf; renderView(); });
+  document.querySelectorAll("#view [data-dashopen]").forEach(b=>b.onclick=()=>{
+    const rec=findEmployeeById(b.dataset.dashopen); if(!rec) return;
+    const unit=state.cfg.businessUnits.find(x=>sameUnit(x,rec.department)); if(unit) state.bu=unit;
+    if(!state.cfg.frameworks[state.bu]) state.cfg.frameworks[state.bu]=cloneFramework(state.bu);
+    state.currentEmployeeId=rec._id;
+    saveKey(keyBU(),state.bu); saveKey(keyCurEmp(),state.currentEmployeeId);
+    state.tab="report"; renderBU(); renderTabs(); renderView(); window.scrollTo(0,0);
+  });
 }
 
 /* ---------- ADMIN ---------- */
@@ -1906,10 +2705,11 @@ function resetAdminPanelToDefault(panel){
   renderBU(); renderView();
 }
 function viewAdmin(){
-  const panels=[["weights","Definitions & Weights"],["mult","Family Multipliers"],["bands","Grade Bands"],["roleexp","Role Expectations"],["importance","Competency Importance"],["devplan","Development Plan"],["employees","Employees"],["units","Business Units"],["users","Users & Access"]];
+  const panels=[["dashboard","L&D Dashboard"],["weights","Definitions & Weights"],["mult","Family Multipliers"],["bands","Grade Bands"],["roleexp","Role Expectations"],["importance","Competency Importance"],["devplan","Training Program Library"],["employees","Employees"],["units","Business Units"],["users","Users & Access"],["backup","Backup & Restore"]];
   const tabs=panels.map(([id,lbl])=>`<button class="btn" data-apanel="${id}" style="padding:6px 12px;font-size:12.5px;border-radius:7px;background:${adminPanel===id?"var(--ink)":"var(--card)"};color:${adminPanel===id?"#fff":"var(--sub)"};border:1px solid ${adminPanel===id?"var(--ink)":"var(--line)"}">${lbl}</button>`).join("");
   let body="";
-  if(adminPanel==="weights") body=adminWeights();
+  if(adminPanel==="dashboard") body=adminDashboard();
+  else if(adminPanel==="weights") body=adminWeights();
   else if(adminPanel==="mult") body=adminMult();
   else if(adminPanel==="bands") body=adminBands();
   else if(adminPanel==="roleexp") body=adminRoleExpectations();
@@ -1917,6 +2717,7 @@ function viewAdmin(){
   else if(adminPanel==="devplan") body=adminDevPlan();
   else if(adminPanel==="employees") body=adminEmployees();
   else if(adminPanel==="units") body=adminUnits();
+  else if(adminPanel==="backup") body=adminBackup();
   else body=adminUsers();
   const resetInfo=RESETTABLE_PANELS[adminPanel];
   const resetBtn=resetInfo?`<button id="resetcfg" class="btn btn-warn" style="display:flex;align-items:center;gap:6px;padding:6px 12px;font-size:12.5px">↺ Reset ${esc(resetInfo.label)} to defaults</button>`:"";
@@ -2128,7 +2929,7 @@ function adminRoleExpectations(){
       <span>🏢</span><span style="font-size:12.5px">Department / unit</span>
       <select id="roleexpunit" style="font-size:13px;font-weight:700;padding:4px 8px;border-radius:6px;border:1px solid #3a4440;background:#20302a;color:#fff">${unitOpts}</select>
       <span style="font-size:11.5px;color:#B9C6C0;margin-left:auto">Each unit keeps its own expectations per grade</span></div>
-    <p style="font-size:12.5px;color:var(--sub);line-height:1.5;margin:0 0 12px">Write an open, free-text description of the role expectations for each Job Grade — what the position looks like, and what's expected of the person, once they reach that level within this department. This appears on the Evaluate screen and printable Report for whichever unit and grade an employee is assessed into.</p>
+    <p style="font-size:12.5px;color:var(--sub);line-height:1.5;margin:0 0 12px">Write an open, free-text description of the role expectations for each Job Grade — what the position looks like, and what's expected of the person, once they reach that level within this department. This appears on the Evaluate screen and printable Result for whichever unit and grade an employee is assessed into — and is pulled in automatically whenever an employee's Target / aspired job grade is set to that grade.</p>
     <div class="row" style="gap:8px;margin-bottom:16px;flex-wrap:wrap">
       <button id="expRoleExp" class="btn btn-ghost" style="display:flex;align-items:center;gap:6px;padding:7px 12px;font-size:12.5px">⭳ Export ${esc(adminRoleExpUnit)} (.xlsx)</button>
       <button id="impRoleExp" class="btn btn-ghost" style="display:flex;align-items:center;gap:6px;padding:7px 12px;font-size:12.5px">⭱ Import into ${esc(adminRoleExpUnit)}</button>
@@ -2273,7 +3074,7 @@ function adminDevPlan(){
   }).join("");
   return `<div class="card" style="padding:20px;margin-bottom:16px">
     <div class="eyebrow" style="margin-bottom:8px">CONVERSATIONAL PLANNER · GAP −1 TO −4</div>
-    <p style="font-size:12.5px;color:var(--sub);line-height:1.5;margin:0 0 12px">Upload the downloadable Conversational Planner form. Whenever a competency's Gap Evaluation falls between −1 and −4, evaluators see a download button for this file in the Development Plan column.</p>
+    <p style="font-size:12.5px;color:var(--sub);line-height:1.5;margin:0 0 12px">Upload the downloadable Conversational Planner form. Whenever a competency's Gap Evaluation falls between −1 and −4, evaluators see a download button for this file in the Suggested Training Program column.</p>
     <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
       <button id="uploadCpBtn" class="btn btn-primary" style="display:flex;align-items:center;gap:6px;padding:8px 14px;font-size:13px">⭱ Upload form</button>
       <input id="uploadCpFile" type="file" style="display:none"/>
@@ -2291,7 +3092,8 @@ function adminDevPlan(){
     </div>
     <div style="margin-top:14px;border:1px solid var(--lineSoft);border-radius:10px;overflow:hidden">${compRows}</div>
     ${trainingProgramManualEditor()}
-  </div>`;
+  </div>
+  ${apYearsAdminCard()}`;
 }
 // Lets the admin add, rename, or remove individual training-program entries for one
 // competency + job family combination at a time, without needing to re-upload a
@@ -2412,7 +3214,7 @@ function adminUsers(){
     </td></tr>`:""}`;
   }).join("");
   return `<div class="card" style="padding:20px;margin-bottom:16px">
-    <p style="font-size:12.5px;color:var(--sub);line-height:1.5;margin:0 0 14px">Everyone who uses this tool signs in with their own account — there's no shared password. <b>Admin</b> accounts can see and change everything, including this panel; <b>Evaluator</b> accounts can only use Evaluate, Development and Report. Passwords are stored only as one-way hashes — nobody, including you, can look up someone's existing password; use <b>Reset password</b> to set a new one for someone who forgot theirs.</p>
+    <p style="font-size:12.5px;color:var(--sub);line-height:1.5;margin:0 0 14px">Everyone who uses this tool signs in with their own account — there's no shared password. <b>Admin</b> accounts can see and change everything, including this panel; <b>Evaluator</b> accounts can only use Evaluate, Development and Result. Passwords are stored only as one-way hashes — nobody, including you, can look up someone's existing password; use <b>Reset password</b> to set a new one for someone who forgot theirs.</p>
     <div class="eyebrow" style="margin-bottom:10px">ADD USER</div>
     <div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:20px">
       <input class="inp" id="newUserName" placeholder="Username" value="${esc(f.username)}" style="flex:1 1 160px"/>
@@ -2546,6 +3348,9 @@ function wireAdmin(){
   };
   const pwCancelBtn=document.getElementById("pwCancelBtn");
   if(pwCancelBtn) pwCancelBtn.onclick=()=>{ adminEditingUserId=null; renderView(); };
+  wireAdminBackup();
+  wireApYears();
+  wireDashboard();
 }
 function updateMultLabels(){ const m=familyMultipliers(); m.forEach((f,i)=>{ const el=document.getElementById("mult-eff-"+i); if(el)el.textContent="×"+f.mult; }); }
 
@@ -2560,6 +3365,7 @@ async function init(){
   if(lu)_lastKnownUpdatedAt=lu; // what this device last confirmed was live — see the stale-write guard in pushToCloud()
   ensureAllShapes();
   migrateLegacySessions();
+  if(hadLocalCache) runSchemaMigration(); // additive, validated, with an automatic local restore point first
 
   // Restore a previously-signed-in account on THIS device/browser, if that account still exists —
   // this only reads back which user id was signed in; the password itself is never stored anywhere.
@@ -2594,6 +3400,8 @@ async function init(){
   if(firebaseReady()) await ensureFirebaseAuth(); // don't attempt a read until signed in, or DB rules reject it
   await pullFromCloud();
   if(shouldWaitForCloud){ renderBU(); renderTabs(); renderAuthBar(); renderView(); }
+  runSchemaMigration();
+  maybeDailyRestorePoint();
   startRealtimeSync();
 }
 init();
